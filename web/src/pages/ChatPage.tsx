@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Bot, Send, Plus, Zap, RotateCcw, MessageSquare, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
+import { useI18n } from "@/i18n/context";
 import type { SessionInfo, SessionMessage } from "@/lib/api";
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -11,17 +12,6 @@ interface Message {
   content: string;
   streaming?: boolean;
 }
-
-// ── Constants ──────────────────────────────────────────────────────────────
-
-const QUICK_ACTIONS = [
-  { icon: "📊", text: "帮我分析数据并生成可视化报告" },
-  { icon: "🔍", text: "搜索今日最新 AI 资讯并总结要点" },
-  { icon: "⚡", text: "列出所有已安装的技能及功能简介" },
-  { icon: "🌐", text: "打开浏览器搜索 GitHub Trending 今日热门项目" },
-  { icon: "🧠", text: "查看我的对话记忆，总结了哪些重要信息" },
-  { icon: "✅", text: "检查当前运行的进程和配置的定时任务" },
-];
 
 const STORAGE_KEY = "hermes_chat_messages";
 const HISTORY_KEY  = "hermes_chat_history";
@@ -38,45 +28,10 @@ function loadSaved() {
   } catch { return { messages: [], history: [] }; }
 }
 
-function relTime(ts: number): string {
-  const diff = Date.now() / 1000 - ts;
-  if (diff < 60)    return "刚刚";
-  if (diff < 3600)  return `${Math.floor(diff / 60)} 分钟前`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
-  if (diff < 86400 * 2) return "昨天";
-  return new Date(ts * 1000).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
-}
-
-function sessionTitle(s: SessionInfo): string {
-  if (s.title) return s.title;
-  if (s.preview) return s.preview.slice(0, 40);
-  return `对话 ${new Date(s.started_at * 1000).toLocaleDateString("zh-CN")}`;
-}
-
-function groupSessions(sessions: SessionInfo[]) {
-  const now = Date.now() / 1000;
-  const today:     SessionInfo[] = [];
-  const yesterday: SessionInfo[] = [];
-  const week:      SessionInfo[] = [];
-  const older:     SessionInfo[] = [];
-  for (const s of sessions) {
-    const diff = now - s.last_active;
-    if      (diff < 86400)     today.push(s);
-    else if (diff < 86400 * 2) yesterday.push(s);
-    else if (diff < 86400 * 7) week.push(s);
-    else                        older.push(s);
-  }
-  return [
-    { label: "今天",   items: today },
-    { label: "昨天",   items: yesterday },
-    { label: "本周",   items: week },
-    { label: "更早",   items: older },
-  ].filter(g => g.items.length > 0);
-}
-
 // ── Component ──────────────────────────────────────────────────────────────
 
 export default function ChatPage() {
+  const { t } = useI18n();
   const saved = loadSaved();
 
   // chat state
@@ -125,12 +80,12 @@ export default function ChatPage() {
     fetch("/api/status").then(r => r.json()).then(d => {
       if (d.gateway_running) {
         const m = d.active_model || "", p = d.active_provider || "";
-        setAgentInfo(m || p ? `${m}${p ? " · " + p : ""} · 已连接` : "Agent 已连接");
+        setAgentInfo(m || p ? `${m}${p ? " · " + p : ""} · ${t.chat.agentConnected}` : `Agent ${t.chat.agentConnected}`);
       } else {
-        setAgentInfo("⚠ Gateway 未运行");
+        setAgentInfo(`⚠ ${t.chat.gatewayNotRunning}`);
       }
-    }).catch(() => setAgentInfo("⚠ 无法连接 API"));
-  }, []);
+    }).catch(() => setAgentInfo(`⚠ ${t.chat.apiNotReachable}`));
+  }, [t]);
 
   // ── Auto-scroll ──
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
@@ -242,7 +197,7 @@ export default function ChatPage() {
         }
       }
 
-      if (!fullText) fullText = "⚠️ Agent 未返回内容，请检查 API Key 和模型配置。";
+      if (!fullText) fullText = `⚠️ ${t.chat.noResponse}`;
       setMessages(prev => prev.map((m, i) => i === prev.length - 1 ? { ...m, content: fullText, streaming: false } : m));
 
       if (!fullText.startsWith("⚠️")) {
@@ -252,17 +207,62 @@ export default function ChatPage() {
       }
     } catch (e: unknown) {
       if ((e as Error).name === "AbortError") return;
-      const msg = `⚠️ 无法连接 Agent API\n${(e as Error).message}`;
+      const msg = `⚠️ ${t.chat.connectionError}\n${(e as Error).message}`;
       setMessages(prev => prev.map((m, i) => i === prev.length - 1 ? { ...m, content: msg, streaming: false } : m));
     } finally {
       setStreaming(false);
       abortRef.current = null;
     }
-  }, [input, streaming, autoResize, refreshSessions]);
+  }, [input, streaming, autoResize, refreshSessions, t]);
 
   const onKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   }, [sendMessage]);
+
+  const relTime = useCallback((ts: number): string => {
+    const diff = Date.now() / 1000 - ts;
+    if (diff < 60)    return t.chat.time.justNow;
+    if (diff < 3600)  return t.chat.time.minutesAgo.replace("{n}", String(Math.floor(diff / 60)));
+    if (diff < 86400) return t.chat.time.hoursAgo.replace("{n}", String(Math.floor(diff / 3600)));
+    if (diff < 86400 * 2) return t.chat.time.yesterday;
+    return new Date(ts * 1000).toLocaleDateString(undefined, { month: "numeric", day: "numeric" });
+  }, [t]);
+
+  const sessionTitle = useCallback((s: SessionInfo): string => {
+    if (s.title) return s.title;
+    if (s.preview) return s.preview.slice(0, 40);
+    return t.chat.sessionDefaultTitle.replace("{date}", new Date(s.started_at * 1000).toLocaleDateString(undefined));
+  }, [t]);
+
+  const groupSessions = useCallback((sessions: SessionInfo[]) => {
+    const now = Date.now() / 1000;
+    const today:     SessionInfo[] = [];
+    const yesterday: SessionInfo[] = [];
+    const week:      SessionInfo[] = [];
+    const older:     SessionInfo[] = [];
+    for (const s of sessions) {
+      const diff = now - s.last_active;
+      if      (diff < 86400)     today.push(s);
+      else if (diff < 86400 * 2) yesterday.push(s);
+      else if (diff < 86400 * 7) week.push(s);
+      else                        older.push(s);
+    }
+    return [
+      { label: t.chat.sessionGroups.today,   items: today },
+      { label: t.chat.sessionGroups.yesterday,   items: yesterday },
+      { label: t.chat.sessionGroups.thisWeek,   items: week },
+      { label: t.chat.sessionGroups.older,   items: older },
+    ].filter(g => g.items.length > 0);
+  }, [t]);
+
+  const QUICK_ACTIONS = [
+    { icon: "📊", text: t.chat.quickActions.analyze },
+    { icon: "🔍", text: t.chat.quickActions.search },
+    { icon: "⚡", text: t.chat.quickActions.skills },
+    { icon: "🌐", text: t.chat.quickActions.browser },
+    { icon: "🧠", text: t.chat.quickActions.memory },
+    { icon: "✅", text: t.chat.quickActions.tasks },
+  ];
 
   const hasMessages = messages.length > 0;
   const groups = groupSessions(sessions);
@@ -278,8 +278,8 @@ export default function ChatPage() {
       `}>
         {/* Sidebar header */}
         <div className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
-          <span className="font-display text-[0.65rem] tracking-[0.15em] uppercase text-muted-foreground">历史对话</span>
-          <Button variant="ghost" size="sm" onClick={newChat} className="h-6 w-6 p-0" title="新对话">
+          <span className="font-display text-[0.65rem] tracking-[0.15em] uppercase text-muted-foreground">{t.chat.history}</span>
+          <Button variant="ghost" size="sm" onClick={newChat} className="h-6 w-6 p-0" title={t.chat.newChat}>
             <Plus className="h-3.5 w-3.5" />
           </Button>
         </div>
@@ -287,7 +287,7 @@ export default function ChatPage() {
         {/* Session list */}
         <div className="flex-1 overflow-y-auto py-1">
           {groups.length === 0 && (
-            <div className="px-3 py-4 text-center text-muted-foreground/50 text-xs">暂无历史对话</div>
+            <div className="px-3 py-4 text-center text-muted-foreground/50 text-xs">{t.chat.noHistory}</div>
           )}
           {groups.map(group => (
             <div key={group.label}>
@@ -327,19 +327,19 @@ export default function ChatPage() {
             variant="ghost" size="sm"
             onClick={() => setSidebarOpen(o => !o)}
             className="h-7 w-7 p-0 text-muted-foreground"
-            title={sidebarOpen ? "收起历史" : "展开历史"}
+            title={sidebarOpen ? t.chat.sidebarToggle.close : t.chat.sidebarToggle.open}
           >
             {sidebarOpen ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           </Button>
 
           <Bot className="h-4 w-4 text-muted-foreground shrink-0" />
           <span className="font-display text-[0.7rem] tracking-[0.12em] uppercase text-muted-foreground truncate flex-1">
-            {activeId ? sessionTitle(sessions.find(s => s.id === activeId) ?? {} as SessionInfo) : "新对话"}
+            {activeId ? sessionTitle(sessions.find(s => s.id === activeId) ?? {} as SessionInfo) : t.chat.newChat}
           </span>
 
           <Button variant="ghost" size="sm" onClick={newChat} className="h-7 gap-1 text-xs shrink-0">
             <Plus className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">新对话</span>
+            <span className="hidden sm:inline">{t.chat.newChat}</span>
           </Button>
         </div>
 
@@ -348,7 +348,7 @@ export default function ChatPage() {
           {loadingHist ? (
             <div className="flex items-center justify-center h-full text-muted-foreground text-sm gap-2">
               <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
-              加载中...
+              {t.chat.loading}
             </div>
           ) : !hasMessages ? (
             /* Welcome */
@@ -358,7 +358,7 @@ export default function ChatPage() {
               </div>
               <div>
                 <h2 className="font-display text-base font-bold tracking-wide uppercase mb-1">Hermes Agent</h2>
-                <p className="text-sm text-muted-foreground">有什么我可以帮你做的？</p>
+                <p className="text-sm text-muted-foreground">{t.chat.welcome}</p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full">
                 {QUICK_ACTIONS.map(a => (
@@ -402,7 +402,7 @@ export default function ChatPage() {
                   </div>
                   {msg.role === "user" && (
                     <div className="shrink-0 mt-1 h-7 w-7 rounded border border-border bg-background flex items-center justify-center text-xs font-bold">
-                      我
+                      {t.chat.userLabel}
                     </div>
                   )}
                 </div>
@@ -421,19 +421,19 @@ export default function ChatPage() {
                 value={input}
                 onChange={e => { setInput(e.target.value); autoResize(); }}
                 onKeyDown={onKeyDown}
-                placeholder="输入消息，Shift+Enter 换行..."
+                placeholder={t.chat.placeholder}
                 rows={1}
                 disabled={streaming || loadingHist}
                 className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground min-h-[1.5rem] max-h-40 py-1 px-1"
               />
               {streaming ? (
                 <Button variant="ghost" size="sm" onClick={() => abortRef.current?.abort()}
-                  className="shrink-0 h-8 w-8 p-0 text-muted-foreground hover:text-destructive" title="停止">
+                  className="shrink-0 h-8 w-8 p-0 text-muted-foreground hover:text-destructive" title={t.chat.stop}>
                   <RotateCcw className="h-4 w-4" />
                 </Button>
               ) : (
                 <Button size="sm" onClick={() => sendMessage()} disabled={!input.trim() || loadingHist}
-                  className="shrink-0 h-8 w-8 p-0" title="发送 (Enter)">
+                  className="shrink-0 h-8 w-8 p-0" title={t.chat.send}>
                   <Send className="h-4 w-4" />
                 </Button>
               )}

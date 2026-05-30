@@ -894,7 +894,7 @@ class AIAgent:
                 if effective_key and len(effective_key) > 12:
                     print(f"🔑 Using token: {effective_key[:8]}...{effective_key[-4:]}")
         else:
-            if api_key and base_url:
+            if base_url and api_key is not None:
                 # Explicit credentials from CLI/gateway — construct directly.
                 # The runtime provider resolver already handled auth for us.
                 client_kwargs = {"api_key": api_key, "base_url": base_url}
@@ -4117,6 +4117,30 @@ class AIAgent:
                 self._client_log_context(),
             )
             return client
+        
+        # For local/custom endpoints without auth (LM Studio, Ollama, etc.),
+        # use a custom OpenAI client that skips auth validation
+        base_url = str(client_kwargs.get("base_url", "")).lower()
+        api_key = client_kwargs.get("api_key", "")
+        is_local = any(h in base_url for h in ("localhost", "127.0.0.1", "0.0.0.0"))
+        needs_no_auth = self.provider == "custom" and is_local and not api_key
+        
+        if needs_no_auth:
+            class _NoAuthOpenAI(OpenAI):
+                """OpenAI client for local servers that don't require authentication."""
+                def _validate_headers(self, headers, custom_headers):
+                    pass  # Skip auth validation for local endpoints
+            
+            client_kwargs["_enforce_credentials"] = False
+            client = _NoAuthOpenAI(**client_kwargs)
+            logger.info(
+                "OpenAI client (no-auth) created for local endpoint (%s, shared=%s) %s",
+                reason,
+                shared,
+                self._client_log_context(),
+            )
+            return client
+        
         client = OpenAI(**client_kwargs)
         logger.info(
             "OpenAI client created (%s, shared=%s) %s",

@@ -1,4 +1,4 @@
-export type Locale = "en" | "zh";
+export type Locale = "en" | "zh" | "ru";
 
 export interface Translations {
   // ── Common ──
@@ -282,6 +282,49 @@ export interface Translations {
       external: string;
     };
     expiresIn: string;
+  };
+
+  // ── Chat page ──
+  chat: {
+    placeholder: string;
+    welcome: string;
+    newChat: string;
+    history: string;
+    noHistory: string;
+    loading: string;
+    send: string;
+    stop: string;
+    quickActions: {
+      analyze: string;
+      search: string;
+      skills: string;
+      browser: string;
+      memory: string;
+      tasks: string;
+    };
+    agentConnected: string;
+    gatewayNotRunning: string;
+    apiNotReachable: string;
+    noResponse: string;
+    connectionError: string;
+    sidebarToggle: {
+      open: string;
+      close: string;
+    };
+    userLabel: string;
+    time: {
+      justNow: string;
+      minutesAgo: string;
+      hoursAgo: string;
+      yesterday: string;
+    };
+    sessionGroups: {
+      today: string;
+      yesterday: string;
+      thisWeek: string;
+      older: string;
+    };
+    sessionDefaultTitle: string;
   };
 
   // ── Language switcher ──

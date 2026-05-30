@@ -273,7 +273,50 @@ export const en: Translations = {
     expiresIn: "expires in {time}",
   },
 
+  // ── Chat page ──
+  chat: {
+    placeholder: "Type a message, Shift+Enter for new line...",
+    welcome: "How can I help you?",
+    newChat: "New Chat",
+    history: "History",
+    noHistory: "No conversations yet",
+    loading: "Loading...",
+    send: "Send (Enter)",
+    stop: "Stop",
+    quickActions: {
+      analyze: "Analyze data and generate a visual report",
+      search: "Search today's latest AI news and summarize",
+      skills: "List all installed skills and their descriptions",
+      browser: "Search GitHub Trending for today's hot projects",
+      memory: "View my conversation memory and key summaries",
+      tasks: "Check running processes and scheduled tasks",
+    },
+    agentConnected: "Connected",
+    gatewayNotRunning: "Gateway not running",
+    apiNotReachable: "Cannot connect to API",
+    noResponse: "Agent returned no content. Check your API key and model config.",
+    connectionError: "Cannot connect to Agent API",
+    sidebarToggle: {
+      open: "Show history",
+      close: "Hide history",
+    },
+    userLabel: "Me",
+    time: {
+      justNow: "just now",
+      minutesAgo: "{n} min ago",
+      hoursAgo: "{n} h ago",
+      yesterday: "Yesterday",
+    },
+    sessionGroups: {
+      today: "Today",
+      yesterday: "Yesterday",
+      thisWeek: "This Week",
+      older: "Older",
+    },
+    sessionDefaultTitle: "Chat {date}",
+  },
+
   language: {
-    switchTo: "Switch to Chinese",
+    switchTo: "Switch language",
   },
 };

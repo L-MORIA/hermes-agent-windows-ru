@@ -273,7 +273,50 @@ export const zh: Translations = {
     expiresIn: "{time}后过期",
   },
 
+  // ── Chat page ──
+  chat: {
+    placeholder: "输入消息，Shift+Enter 换行...",
+    welcome: "有什么我可以帮你做的？",
+    newChat: "新对话",
+    history: "历史对话",
+    noHistory: "暂无历史对话",
+    loading: "加载中...",
+    send: "发送 (Enter)",
+    stop: "停止",
+    quickActions: {
+      analyze: "帮我分析数据并生成可视化报告",
+      search: "搜索今日最新 AI 资讯并总结要点",
+      skills: "列出所有已安装的技能及功能简介",
+      browser: "打开浏览器搜索 GitHub Trending 今日热门项目",
+      memory: "查看我的对话记忆，总结了哪些重要信息",
+      tasks: "检查当前运行的进程和配置的定时任务",
+    },
+    agentConnected: "已连接",
+    gatewayNotRunning: "Gateway 未运行",
+    apiNotReachable: "无法连接 API",
+    noResponse: "Agent 未返回内容，请检查 API Key 和模型配置。",
+    connectionError: "无法连接 Agent API",
+    sidebarToggle: {
+      open: "展开历史",
+      close: "收起历史",
+    },
+    userLabel: "我",
+    time: {
+      justNow: "刚刚",
+      minutesAgo: "{n} 分钟前",
+      hoursAgo: "{n} 小时前",
+      yesterday: "昨天",
+    },
+    sessionGroups: {
+      today: "今天",
+      yesterday: "昨天",
+      thisWeek: "本周",
+      older: "更早",
+    },
+    sessionDefaultTitle: "对话 {date}",
+  },
+
   language: {
-    switchTo: "切换到英文",
+    switchTo: "切换语言",
   },
 };

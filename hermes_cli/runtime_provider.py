@@ -501,7 +501,7 @@ def _resolve_openrouter_runtime(
             return pool_result
 
     if effective_provider == "custom" and not api_key and not _is_openrouter_url:
-        api_key = "no-key-required"
+        api_key = ""
 
     return {
         "provider": effective_provider,

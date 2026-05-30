@@ -100,6 +100,21 @@ def _get_process_start_time(pid: int) -> Optional[int]:
 
 def _read_process_cmdline(pid: int) -> Optional[str]:
     """Return the process command line as a space-separated string."""
+    if _IS_WINDOWS:
+        try:
+            import psutil
+            proc = psutil.Process(pid)
+            return " ".join(proc.cmdline())
+        except ImportError:
+            try:
+                result = subprocess.run(
+                    ["wmic", "process", "where", f"processid={pid}", "get", "commandline", "/format:value"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                m = __import__("re").search(r"CommandLine=(.+)", result.stdout, __import__("re").IGNORECASE)
+                return m.group(1).strip() if m else None
+            except Exception:
+                return None
     cmdline_path = Path(f"/proc/{pid}/cmdline")
     try:
         raw = cmdline_path.read_bytes()
@@ -122,6 +137,8 @@ def _looks_like_gateway_process(pid: int) -> bool:
         "hermes_cli/main.py gateway",
         "hermes gateway",
         "gateway/run.py",
+        "hermes_cli\\main.py gateway",
+        "main.py gateway run",
     )
     return any(pattern in cmdline for pattern in patterns)
 
@@ -141,6 +158,8 @@ def _record_looks_like_gateway(record: dict[str, Any]) -> bool:
         "hermes_cli/main.py gateway",
         "hermes gateway",
         "gateway/run.py",
+        "hermes_cli\\main.py gateway",
+        "main.py gateway run",
     )
     return any(pattern in cmdline for pattern in patterns)
 
