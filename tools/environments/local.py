@@ -153,17 +153,19 @@ def _find_bash() -> str:
     if custom and os.path.isfile(custom):
         return custom
 
-    found = shutil.which("bash")
-    if found:
-        return found
-
     for candidate in (
         os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "Git", "bin", "bash.exe"),
         os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"), "Git", "bin", "bash.exe"),
         os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Git", "bin", "bash.exe"),
+        os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "Git", "usr", "bin", "bash.exe"),
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Git", "usr", "bin", "bash.exe"),
     ):
         if candidate and os.path.isfile(candidate):
             return candidate
+
+    found = shutil.which("bash")
+    if found and "system32" not in found.lower() and "windows\\bash" not in found.lower():
+        return found
 
     raise RuntimeError(
         "Git Bash not found. Hermes Agent requires Git for Windows on Windows.\n"
@@ -237,6 +239,9 @@ class LocalEnvironment(BaseEnvironment):
         override the temp root explicitly (for example via terminal.env or a
         custom TMPDIR), then fall back to the host process environment.
         """
+        if _IS_WINDOWS:
+            return tempfile.gettempdir().rstrip("\\") or tempfile.gettempdir()
+
         for env_var in ("TMPDIR", "TMP", "TEMP"):
             candidate = self.env.get(env_var) or os.environ.get(env_var)
             if candidate and candidate.startswith("/"):
@@ -294,16 +299,25 @@ class LocalEnvironment(BaseEnvironment):
                 pass
 
     def _update_cwd(self, result: dict):
-        """Read CWD from temp file (local-only, no round-trip needed)."""
-        try:
-            cwd_path = open(self._cwd_file).read().strip()
-            if cwd_path:
-                self.cwd = cwd_path
-        except (OSError, FileNotFoundError):
-            pass
+        """Read CWD from temp file or Git Bash output (local-only).
 
-        # Still strip the marker from output so it's not visible
-        self._extract_cwd_from_output(result)
+        On Windows with Git Bash, ``pwd -P`` returns MSYS2 paths
+        (``/c/Users/...``) that are incompatible with file tools and Python.
+        Since the local backend already knows its correct Windows cwd from
+        config, we keep ``self.cwd`` unchanged and only strip the marker
+        from the output text so the model doesn't see it.
+        """
+        if not _IS_WINDOWS:
+            try:
+                cwd_path = open(self._cwd_file).read().strip()
+                if cwd_path:
+                    self.cwd = cwd_path
+            except (OSError, FileNotFoundError):
+                pass
+            self._extract_cwd_from_output(result)
+        else:
+            # Strip marker on Windows without overwriting self.cwd
+            self._strip_cwd_marker(result)
 
     def cleanup(self):
         """Clean up temp files."""

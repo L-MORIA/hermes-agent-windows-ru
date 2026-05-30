@@ -67,7 +67,7 @@ python -m hermes_cli.main web
 ## 🔴 Проблема: Gateway: False в веб-интерфейсе
 
 ### Симптом
-Веб-интерфейс показывает `Gateway: False`, хотя процессы Python запущены.
+Веб-интерфейс показывает `Gateway: False`, хотя процессы Python запущены. Или: Web UI открывается, но при отправке сообщения пишет "⚠️ Агент не вернул ответ" / "⚠️ 无法连接到 Gateway API".
 
 ### Причина
 Код определения gateway (`gateway/status.py`) использует Linux-специфичные пути:
@@ -111,17 +111,119 @@ patterns = (
 ### Решение
 Файл `gateway/status.py` уже исправлен в этом репозитории. Просто используйте эту версию.
 
-### Если проблема всё ещё возникает
+### Если проблема всё ещё возникает — пошаговый план
+
+#### Шаг 1: Проверить и почистить залипшие файлы
+При аварийном завершении остаются stale `.pid` и `.lock` файлы, которые блокируют новый запуск:
+
 ```powershell
-# Проверить, что gateway.pid существует
-Get-Content "$env:USERPROFILE\.hermes\gateway.pid"
-
-# Проверить, что процесс жив
-Get-Process -Id (Get-Content "$env:USERPROFILE\.hermes\gateway.pid" | 
-    ConvertFrom-Json).pid
-
-# Принудительно убить все процессы Python и запустить заново
+# Убить ВСЕ процессы Python
 taskkill /F /IM python.exe
+
+# Удалить stale PID и lock файлы
+Remove-Item "$env:USERPROFILE\.hermes\gateway.pid" -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:USERPROFILE\.hermes\gateway.lock" -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:USERPROFILE\.hermes\webui.pid" -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:USERPROFILE\.hermes\webui.lock" -Force -ErrorAction SilentlyContinue
+```
+
+#### Шаг 2: Проверить, что порты свободны
+```powershell
+# Проверить порт 8642 (gateway API)
+try { $s = [System.Net.Sockets.TcpClient]::new(); 
+       $s.ConnectAsync("127.0.0.1", 8642).Wait(1000); 
+       if ($s.Connected) { Write-Host "8642 занят" } else { Write-Host "8642 свободен" };
+       $s.Dispose() } catch { Write-Host "8642 свободен" }
+
+# Проверить порт 9119 (web UI)
+try { $s = [System.Net.Sockets.TcpClient]::new(); 
+       $s.ConnectAsync("127.0.0.1", 9119).Wait(1000); 
+       if ($s.Connected) { Write-Host "9119 занят" } else { Write-Host "9119 свободен" };
+       $s.Dispose() } catch { Write-Host "9119 свободен" }
+```
+
+Если порт занят, убить процесс:
+```powershell
+netstat -ano | Select-String "127.0.0.1:8642"  # или :9119
+Stop-Process -Id <PID> -Force
+```
+
+#### Шаг 3: Установить PYTHONIOENCODING
+Открой **НОВОЕ** окно PowerShell и выполни:
+
+```powershell
+# Обязательно для новой сессии (кодировка UTF-8)
+[Environment]::SetEnvironmentVariable("PYTHONIOENCODING", "utf-8", "User")
+# ИЛИ для текущей сессии:
+$env:PYTHONIOENCODING = "utf-8"
+```
+
+#### Шаг 4: Проверить config.yaml
+```yaml
+model:
+  provider: custom
+  base_url: http://localhost:1234/v1   # или твой IP
+  default: <имя-модели>
+  # api_key: ''   ← ДОЛЖЕН быть пустым или отсутствовать
+
+platforms:
+  api_server:
+    enabled: true   # ← обязательно!
+
+# Не забудь также:
+model:
+  api_key: null    # ← null, а не пустая строка
+```
+
+#### Шаг 5: Проверить .env
+**Файл `~/.hermes/.env`:**
+```bash
+OPENAI_API_KEY=           # ← пустое значение
+GATEWAY_ALLOW_ALL_USERS=true
+```
+
+Без `GATEWAY_ALLOW_ALL_USERS=true` gateway отвечает 403 на все запросы.
+
+#### Шаг 6: Запустить Web UI
+```powershell
+cd C:\путь\к\hermes-agent-windows-ru
+$env:PYTHONIOENCODING = "utf-8"
+.\venv\Scripts\python -m hermes_cli.main web
+```
+
+#### Шаг 7: Проверить в браузере
+1. Открой `http://localhost:9119`
+2. Жди ~10-15 секунд (gateway стартует в фоне)
+3. Статус Gateway должен смениться на "Запущен"
+4. Отправь сообщение
+
+### Диагностика проблем
+Если не работает, проверь:
+
+```powershell
+# 1. Логи
+Get-Content "$env:USERPROFILE\.hermes\logs\agent.log" -Tail 20
+Get-Content "$env:USERPROFILE\.hermes\logs\errors.log" -Tail 5
+
+# 2. Gateway API
+Invoke-WebRequest -Uri "http://127.0.0.1:8642/health" -UseBasicParsing
+
+# 3. Web UI
+Invoke-WebRequest -Uri "http://127.0.0.1:9119" -UseBasicParsing
+
+# 4. LM Studio
+Invoke-RestMethod -Uri "http://localhost:1234/v1/models" -Method Get
+```
+
+### Полный сброс (если всё сломалось)
+```powershell
+# Атомарный сброс — одной командой:
+taskkill /F /IM python.exe 2>$null; Start-Sleep 2; `
+Remove-Item "$env:USERPROFILE\.hermes\gateway.pid" -Force -ErrorAction SilentlyContinue; `
+Remove-Item "$env:USERPROFILE\.hermes\gateway.lock" -Force -ErrorAction SilentlyContinue; `
+Remove-Item "$env:USERPROFILE\.hermes\webui.pid" -Force -ErrorAction SilentlyContinue; `
+Remove-Item "$env:USERPROFILE\.hermes\webui.lock" -Force -ErrorAction SilentlyContinue; `
+$env:PYTHONIOENCODING="utf-8"; `
 python -m hermes_cli.main web
 ```
 
@@ -192,6 +294,62 @@ python -m hermes_cli.main web
 python -c "import sys; print(f'Encoding: {sys.stdout.encoding}')"
 # Должно вывести: Encoding: utf-8
 ```
+
+---
+
+## 🔴 Проблема: UnicodeDecodeError в subprocess _readerthread
+
+### Симптом
+```
+Exception in thread Thread-1 (_readerthread):
+Traceback (most recent call last):
+  File "C:\Python314\Lib\threading.py", line 1082, in _bootstrap_inner
+    ...
+  File "C:\Python314\Lib\subprocess.py", line 1613, in _readerthread
+    buffer.append(fh.read())
+UnicodeDecodeError: 'utf-8' codec can't decode byte 0x88 in position 0: invalid start byte
+```
+
+### Причина
+Gateway запускает дочерние процессы (например, cron, скрипты). 
+Если дочерний процесс выводит байты в кодировке CP1251 (русская Windows),
+а Python ожидает UTF-8 (из-за `PYTHONIOENCODING=utf-8`), возникает ошибка декодирования.
+
+### Решение
+Ошибка **не критическая** — gateway продолжает работать. Но если она мешает:
+
+#### Вариант 1: Игнорировать (рекомендуется)
+Ошибка выводится однократно при запуске и не влияет на работу gateway.
+
+#### Вариант 2: Исправить в subprocess.py (временное решение)
+Если ошибка повторяется и вызывает остановку, замени в вызовах `subprocess.run`:
+```python
+# Было:
+capture_output=True, text=True
+
+# Стало:
+capture_output=True, text=True, encoding="cp1251", errors="replace"
+```
+
+**Файл:** `hermes_cli/gateway.py` (строка ~310, функция `stop_profile_gateway`)
+
+```python
+# Было:
+os.kill(pid, signal.SIGTERM)  # ❌ Не работает на Windows
+
+# Стало (уже исправлено в этом репозитории):
+if _IS_WINDOWS:
+    subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, encoding="cp1251", errors="replace")
+else:
+    os.kill(pid, signal.SIGTERM)
+```
+
+#### Вариант 3: Не использовать `PYTHONIOENCODING=utf-8`
+Если кодировка UTF-8 не принципиальна, удали переменную:
+```powershell
+[Environment]::SetEnvironmentVariable("PYTHONIOENCODING", $null, "User")
+```
+Но тогда может не работать псевдографика (символы ╭ ─ ╮).
 
 ---
 

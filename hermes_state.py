@@ -961,7 +961,7 @@ class SessionDB:
         sanitized = re.sub(r'"[^"]*"', _preserve_quoted, query)
 
         # Step 2: Strip remaining (unmatched) FTS5-special characters
-        sanitized = re.sub(r'[+{}()\"^]', " ", sanitized)
+        sanitized = re.sub(r'[-+{}()\"^]', " ", sanitized)
 
         # Step 3: Collapse repeated * (e.g. "***") into a single one,
         # and remove leading * (prefix-only needs at least one char before *)

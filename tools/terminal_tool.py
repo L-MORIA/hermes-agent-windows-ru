@@ -48,6 +48,33 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Windows path conversion for Git Bash compatibility
+# ---------------------------------------------------------------------------
+
+_IS_WINDOWS = platform.system() == "Windows"
+
+
+def _convert_win_paths_to_msys2(command: str) -> str:
+    """Convert Windows-style paths (C:\\Users\\...) to MSYS2 format (/c/Users/...)
+
+    On Windows, Git Bash interprets backslashes as escape characters.
+    When the model generates commands with Windows paths like
+    ``python C:\\Users\\User\\script.py``, the backslashes break in bash.
+    This function converts them to MSYS2 format that bash understands.
+    """
+    if not _IS_WINDOWS or not command:
+        return command
+
+    def _convert_path(m):
+        drive = m.group(1).lower()
+        rest = m.group(2).replace("\\", "/")
+        return f"/{drive}/{rest}"
+
+    command = re.sub(r'([A-Za-z]):\\([^\s"\']+)', _convert_path, command)
+    return command
+
+
+# ---------------------------------------------------------------------------
 # Global interrupt event: set by the agent when a user interrupt arrives.
 # The terminal tool polls this during command execution so it can kill
 # long-running subprocesses immediately instead of blocking until timeout.
@@ -150,7 +177,7 @@ def _check_all_guards(command: str, env_type: str) -> dict:
 # Allowlist: characters that can legitimately appear in directory paths.
 # Covers alphanumeric, path separators, tilde, dot, hyphen, underscore, space,
 # plus, at, equals, and comma.  Everything else is rejected.
-_WORKDIR_SAFE_RE = re.compile(r'^[A-Za-z0-9/_\-.~ +@=,]+$')
+_WORKDIR_SAFE_RE = re.compile(r'^[A-Za-z0-9/_\-.~ +@=,:\\]+$')
 
 
 def _validate_workdir(workdir: str) -> str | None:
@@ -509,7 +536,11 @@ from tools.managed_tool_gateway import is_managed_tool_gateway_ready
 
 
 # Tool description for LLM
-TERMINAL_TOOL_DESCRIPTION = """Execute shell commands on a Linux environment. Filesystem usually persists between calls.
+TERMINAL_TOOL_DESCRIPTION = (
+    "Execute shell commands on a Windows environment (via Git Bash). "
+    if platform.system() == "Windows"
+    else "Execute shell commands on a Linux environment. "
+) + """Filesystem usually persists between calls.
 
 Do NOT use cat/head/tail to read files — use read_file instead.
 Do NOT use grep/rg/find to search — use search_files instead.
@@ -619,6 +650,14 @@ def _get_env_config() -> Dict[str, Any]:
     cwd = os.getenv("TERMINAL_CWD", default_cwd)
     host_cwd = None
     host_prefixes = ("/Users/", "/home/", "C:\\", "C:/")
+    # Validate TERMINAL_CWD for local and ssh backends (same as per-command workdir check)
+    if env_type in ("local", "ssh") and cwd != default_cwd:
+        workdir_error = _validate_workdir(cwd)
+        if workdir_error:
+            logger.warning("Ignoring TERMINAL_CWD=%r for %s backend "
+                           "(%s). Using %r instead.",
+                           cwd, env_type, workdir_error, default_cwd)
+            cwd = default_cwd
     if env_type == "docker" and mount_docker_cwd:
         docker_cwd_source = os.getenv("TERMINAL_CWD") or os.getcwd()
         candidate = os.path.abspath(os.path.expanduser(docker_cwd_source))
@@ -1353,6 +1392,8 @@ def terminal_tool(
 
             session_key = get_current_session_key(default="")
             effective_cwd = workdir or cwd
+            # Convert Windows paths to MSYS2 format for Git Bash on Windows
+            command = _convert_win_paths_to_msys2(command)
             try:
                 if env_type == "local":
                     proc_session = process_registry.spawn_local(
@@ -1434,6 +1475,9 @@ def terminal_tool(
             max_retries = 3
             retry_count = 0
             result = None
+            
+            # Convert Windows paths to MSYS2 format for Git Bash on Windows
+            command = _convert_win_paths_to_msys2(command)
             
             while retry_count <= max_retries:
                 try:

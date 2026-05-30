@@ -64,3 +64,8 @@ result
 packaging/windows-installer/build/
 packaging/windows-installer/dist/
 packaging/windows-installer/_repo_stage/
+
+# Windows temp files
+*.log
+hermes-cwd-*.txt
+hermes-snap-*.sh

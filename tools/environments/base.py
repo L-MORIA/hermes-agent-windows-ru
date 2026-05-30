@@ -252,9 +252,9 @@ class BaseEnvironment(ABC):
         self.env = env or {}
 
         self._session_id = uuid.uuid4().hex[:12]
-        temp_dir = self.get_temp_dir().rstrip("/") or "/"
-        self._snapshot_path = f"{temp_dir}/hermes-snap-{self._session_id}.sh"
-        self._cwd_file = f"{temp_dir}/hermes-cwd-{self._session_id}.txt"
+        temp_dir = self.get_temp_dir().rstrip("/").rstrip("\\") or "/"
+        self._snapshot_path = os.path.join(temp_dir, f"hermes-snap-{self._session_id}.sh")
+        self._cwd_file = os.path.join(temp_dir, f"hermes-cwd-{self._session_id}.txt")
         self._cwd_marker = _cwd_marker(self._session_id)
         self._snapshot_ready = False
 
@@ -463,6 +463,28 @@ class BaseEnvironment(ABC):
     def _update_cwd(self, result: dict):
         """Extract CWD from command output. Override for local file-based read."""
         self._extract_cwd_from_output(result)
+
+    def _strip_cwd_marker(self, result: dict):
+        """Strip the cwd marker from output without updating self.cwd.
+
+        Used on Windows where Git Bash returns MSYS2 paths (``/c/Users/...``)
+        that should not overwrite the native Windows cwd.
+        """
+        output = result.get("output", "")
+        marker = self._cwd_marker
+        last = output.rfind(marker)
+        if last == -1:
+            return
+        search_start = max(0, last - 4096)
+        first = output.rfind(marker, search_start, last)
+        if first == -1 or first == last:
+            return
+        line_start = output.rfind("\n", 0, first)
+        if line_start == -1:
+            line_start = first
+        line_end = output.find("\n", last + len(marker))
+        line_end = line_end + 1 if line_end != -1 else len(output)
+        result["output"] = output[:line_start] + output[line_end:]
 
     def _extract_cwd_from_output(self, result: dict):
         """Parse the __HERMES_CWD_{session}__ marker from stdout output.

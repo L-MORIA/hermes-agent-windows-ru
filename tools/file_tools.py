@@ -16,6 +16,24 @@ logger = logging.getLogger(__name__)
 
 _EXPECTED_WRITE_ERRNOS = {errno.EACCES, errno.EPERM, errno.EROFS}
 
+_IS_WINDOWS = os.name == "nt"
+
+
+def _to_windows_path(path: str) -> str:
+    """Convert MSYS2-style path (``/c/Users/...``) to Windows path (``C:\\Users\\...``).
+
+    Git Bash on Windows returns MSYS2 paths like ``/c/Users/name``.
+    Python's ``Path()`` cannot resolve them. This function converts them
+    so file tools work correctly when the model uses paths from terminal output.
+    """
+    if not _IS_WINDOWS or not path:
+        return path
+    if len(path) > 2 and path[0] == "/" and path[2] == "/" and path[1].isalpha():
+        return f"{path[1].upper()}:\\{path[3:].replace('/', '\\')}"
+    if len(path) > 2 and path[0] == "/" and path[2] == "/" and path[1] == ":" and len(path) > 4:
+        return f"{path[1].upper()}:\\{path[4:].replace('/', '\\')}"
+    return path
+
 # ---------------------------------------------------------------------------
 # Read-size guard: cap the character count returned to the model.
 # We're model-agnostic so we can't count tokens; characters are a safe proxy.
@@ -293,6 +311,7 @@ def read_file_tool(path: str, offset: int = 1, limit: int = 500, task_id: str = 
                 ),
             })
 
+        path = _to_windows_path(path)
         _resolved = Path(path).expanduser().resolve()
 
         # ── Binary file guard ─────────────────────────────────────────
@@ -514,6 +533,7 @@ def _check_file_staleness(filepath: str, task_id: str) -> str | None:
     the last read_file call for this task), or None if the file is fresh
     or was never read.  Does not block — the write still proceeds.
     """
+    filepath = _to_windows_path(filepath)
     try:
         resolved = str(Path(filepath).expanduser().resolve())
     except (OSError, ValueError):
@@ -540,6 +560,7 @@ def _check_file_staleness(filepath: str, task_id: str) -> str | None:
 
 def write_file_tool(path: str, content: str, task_id: str = "default") -> str:
     """Write content to a file."""
+    path = _to_windows_path(path)
     sensitive_err = _check_sensitive_path(path)
     if sensitive_err:
         return tool_error(sensitive_err)
@@ -624,6 +645,7 @@ def search_tool(pattern: str, target: str = "content", path: str = ".",
                 output_mode: str = "content", context: int = 0,
                 task_id: str = "default") -> str:
     """Search for content or files."""
+    path = _to_windows_path(path)
     try:
         # Track searches to detect *consecutive* repeated search loops.
         # Include pagination args so users can page through truncated
