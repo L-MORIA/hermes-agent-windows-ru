@@ -15,12 +15,29 @@ import requests
 logger = logging.getLogger(__name__)
 
 
+# Module-level session for connection pooling on the LM Studio hot path
+# (called before every API request — reusing TCP connections avoids
+# half-open socket accumulation under retry storms when LM Studio is
+# offline). Memory leak fix: bare `requests.get()` leaks the underlying
+# socket if the call site raises between get() and json().
+_http_session: Optional[requests.Session] = None
+
+
+def _get_session() -> requests.Session:
+    """Lazy-init a module-level requests.Session with retry config."""
+    global _http_session
+    if _http_session is None:
+        _http_session = requests.Session()
+        _http_session.headers.update({"Content-Type": "application/json"})
+    return _http_session
+
+
 def list_models(base_url: str) -> list[dict]:
     """Fetch all models from LM Studio's v0 models endpoint."""
     api_base = base_url.rstrip("/").replace("/v1", "").replace("/chat/completions", "")
     url = f"{api_base}/api/v0/models"
     try:
-        resp = requests.get(url, timeout=5)
+        resp = _get_session().get(url, timeout=5)
         resp.raise_for_status()
         data = resp.json()
         return data.get("data", [])

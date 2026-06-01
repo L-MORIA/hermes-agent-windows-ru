@@ -1064,9 +1064,11 @@ def cmd_web(args):
     try:
         import socket as _socket
         _sock = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
-        _sock.settimeout(1.0)
-        _gw_result = _sock.connect_ex(("127.0.0.1", 8642))
-        _sock.close()
+        try:
+            _sock.settimeout(1.0)
+            _gw_result = _sock.connect_ex(("127.0.0.1", 8642))
+        finally:
+            _sock.close()
         if _gw_result != 0:
             print("⚙  Gateway 未运行，正在后台自动启动...")
             import subprocess as _subprocess, sys as _sys, os as _os, time as _time
@@ -1084,13 +1086,14 @@ def cmd_web(args):
                 for _i in range(20):
                     _time.sleep(0.5)
                     _s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
-                    _s.settimeout(0.5)
-                    if _s.connect_ex(("127.0.0.1", 8642)) == 0:
+                    try:
+                        _s.settimeout(0.5)
+                        if _s.connect_ex(("127.0.0.1", 8642)) == 0:
+                            print("✓ Gateway 已启动（端口 8642 就绪）")
+                            print()
+                            break
+                    finally:
                         _s.close()
-                        print("✓ Gateway 已启动（端口 8642 就绪）")
-                        print()
-                        break
-                    _s.close()
                 else:
                     print("⚠️  Gateway 启动超时，请手动运行：hermes gateway run")
                     print()
