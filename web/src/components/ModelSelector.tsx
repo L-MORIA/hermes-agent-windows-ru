@@ -156,6 +156,12 @@ export function ModelSelector({
 
   const displayLabel = currentModel || (modelInfo?.model ?? "");
   const providerLabel = modelInfo?.provider ?? "";
+  const isStaleProvider = !!(
+    selectedProvider && modelInfo?.provider && selectedProvider !== modelInfo.provider
+  );
+  const currentModelStillValid = isStaleProvider
+    ? models.some((m) => m.id === (modelInfo?.model ?? ""))
+    : true;
 
   return (
     <div ref={containerRef} className="relative shrink-0">
@@ -170,16 +176,34 @@ export function ModelSelector({
           "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-foreground/30",
           "disabled:cursor-not-allowed disabled:opacity-50",
         )}
-        title={`${currentModel}${providerLabel ? ` (${providerLabel})` : ""}`}
+        title={
+          isStaleProvider
+            ? `${displayLabel} (${modelInfo?.provider}) — provider changed to ${selectedProvider}, pick a model below to confirm`
+            : `${displayLabel}${providerLabel ? ` (${providerLabel})` : ""}`
+        }
       >
         {status.kind === "loading" || infoLoading ? (
           <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
         ) : status.kind === "error" ? (
           <AlertCircle className="h-3 w-3 text-destructive" />
+        ) : isStaleProvider ? (
+          <AlertCircle className="h-3 w-3 text-amber-500 shrink-0" />
         ) : (
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
         )}
-        <span className="truncate max-w-[180px]">{displayLabel || "No model"}</span>
+        <span
+          className={cn(
+            "truncate max-w-[180px]",
+            isStaleProvider && "text-amber-700 dark:text-amber-300",
+          )}
+        >
+          {displayLabel || "No model"}
+          {isStaleProvider && !currentModelStillValid && (
+            <span className="ml-1.5 text-[10px] text-amber-600/80 dark:text-amber-400/80">
+              (not in {selectedProvider})
+            </span>
+          )}
+        </span>
         <ChevronDown
           className={cn(
             "h-3 w-3 text-muted-foreground transition-transform shrink-0",
@@ -194,8 +218,25 @@ export function ModelSelector({
             "absolute right-0 top-full mt-1 z-50 w-[480px]",
             "border border-border bg-popover text-popover-foreground shadow-xl",
             "animate-[fade-in_100ms_ease-out]",
+            isStaleProvider && "border-amber-500/50",
           )}
         >
+          {isStaleProvider && (
+            <div className="border-b border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] font-mono text-amber-700 dark:text-amber-300">
+              <div className="flex items-center gap-1.5 font-semibold">
+                <AlertCircle className="h-3 w-3" />
+                Provider changed
+              </div>
+              <div className="mt-1 text-amber-700/80 dark:text-amber-300/80">
+                Active model <span className="font-mono">{modelInfo?.model}</span> is from{" "}
+                <span className="font-mono">{modelInfo?.provider}</span>, but you picked{" "}
+                <span className="font-mono">{selectedProvider}</span>.
+                {!currentModelStillValid && " That model isn't available in this provider."}{" "}
+                Pick a model below to confirm the switch.
+              </div>
+            </div>
+          )}
+
           {/* Search box */}
           <div className="flex items-center gap-2 border-b border-border px-3 py-2">
             <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
