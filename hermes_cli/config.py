@@ -30,7 +30,7 @@ _ENV_VAR_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # Env var names written to .env that aren't in OPTIONAL_ENV_VARS
 # (managed by setup/provider flows directly).
 _EXTRA_ENV_KEYS = frozenset({
-    "OPENAI_API_KEY", "OPENAI_BASE_URL",
+    "OPENAI_API_KEY", "OPENAI_BASE_URL", "OLLAMA_API_KEY",
     "ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN",
     "DISCORD_HOME_CHANNEL", "TELEGRAM_HOME_CHANNEL",
     "SIGNAL_ACCOUNT", "SIGNAL_HTTP_URL",
