@@ -222,6 +222,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "gpt-oss:20b",
         "mistral-large-3",
         "llama-4-maverick",
+        "minimax-m3",
     ],
     "opencode-zen": [
         "gpt-5.4-pro",

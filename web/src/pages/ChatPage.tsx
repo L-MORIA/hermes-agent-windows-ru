@@ -94,17 +94,50 @@ export default function ChatPage() {
     }).catch(() => setAgentInfo(`⚠ ${t.chat.apiNotReachable}`));
   }, [t]);
 
-  // ── Model selector handler (Tier 1: same-provider model change) ──
+  // ── Model selector handler (Tier 1: works for same-provider AND cross-provider) ──
   const handleModelChange = useCallback(
-    async (newModel: string) => {
+    async (newModel: string, newProvider: string) => {
       try {
-        // Read current model config so we preserve provider/base_url/api_mode
+        // Read current model config so we know the current provider/base_url
         const cfg = (await api.getConfig()) as { model?: unknown };
-        const updated = { ...cfg, model: newModel };
+        const currentModelField = cfg.model;
+        const currentProvider =
+          typeof currentModelField === "object" && currentModelField !== null
+            ? (currentModelField as { provider?: string }).provider ?? ""
+            : "";
+        const currentBaseUrl =
+          typeof currentModelField === "object" && currentModelField !== null
+            ? (currentModelField as { base_url?: string }).base_url ?? ""
+            : "";
+
+        let modelField: unknown;
+        if (newProvider === currentProvider) {
+          // Same provider — keep existing dict form, just change the model name
+          if (typeof currentModelField === "object" && currentModelField !== null) {
+            modelField = { ...(currentModelField as Record<string, unknown>), model: newModel };
+          } else {
+            modelField = newModel;
+          }
+        } else {
+          // Cross-provider — build a full {provider, model, base_url?} dict
+          // For "custom" / "lmstudio" — preserve existing base_url (user's local server)
+          // For ollama-cloud / cloud providers — base_url comes from registry default
+          const dict: Record<string, unknown> = { provider: newProvider, model: newModel };
+          if (newProvider === "custom" && currentBaseUrl) {
+            dict.base_url = currentBaseUrl;
+          }
+          modelField = dict;
+        }
+
+        const updated = { ...cfg, model: modelField };
         await api.saveConfig(updated);
         setCurrentModel(newModel);
         setModelSwitchKey((k) => k + 1);
-        showToast(`Model set to ${newModel} (will apply to new sessions)`, "success");
+        const toastMsg =
+          newProvider !== currentProvider
+            ? `Switched to ${newProvider}/${newModel} (will apply to new sessions)`
+            : `Model set to ${newModel} (will apply to new sessions)`;
+        showToast(toastMsg, "success");
       } catch (e) {
         showToast(`Failed to switch model: ${(e as Error).message}`, "error");
       }

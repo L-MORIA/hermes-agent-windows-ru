@@ -593,7 +593,7 @@ def get_model_info():
 
         # Extract model name and provider from the config
         if isinstance(model_cfg, dict):
-            model_name = model_cfg.get("default", model_cfg.get("name", ""))
+            model_name = model_cfg.get("default") or model_cfg.get("name") or model_cfg.get("model", "")
             provider = model_cfg.get("provider", "")
             base_url = model_cfg.get("base_url", "")
             config_ctx = model_cfg.get("context_length")

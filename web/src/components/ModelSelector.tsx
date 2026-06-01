@@ -8,8 +8,12 @@ interface ModelSelectorProps {
   currentModel: string;
   /** Bump to refetch model info (e.g. after a save) */
   refreshKey?: number;
-  /** Notified when user picks a new model string.  Parent applies it. */
-  onChange: (newModel: string) => void;
+  /**
+   * Notified when user picks a new model.
+   * @param newModel    the model id (e.g. "qwen3.6-35b-a3b-claude-4.7-opus-reasoning-distilled@q5_k_m")
+   * @param newProvider the provider slug (e.g. "ollama-cloud", "custom", "openrouter")
+   */
+  onChange: (newModel: string, newProvider: string) => void;
   /** Disable the selector (e.g. while streaming) */
   disabled?: boolean;
 }
@@ -258,36 +262,34 @@ export function ModelSelector({
               ) : (
                 filteredModels.map((m) => {
                   const isCurrent = m.id === currentModel;
+                  const willSwitchProvider =
+                    selectedProvider !== null && modelInfo?.provider !== selectedProvider;
                   return (
                     <button
                       key={m.id}
                       type="button"
                       onClick={() => {
-                        if (!isCurrent) {
-                          // Tier 1: only allow if same provider (no live switch yet)
-                          if (selectedProvider && modelInfo?.provider === selectedProvider) {
-                            onChange(m.id);
-                            setOpen(false);
-                          }
+                        if (!isCurrent && selectedProvider) {
+                          onChange(m.id, selectedProvider);
+                          setOpen(false);
                         }
                       }}
-                      disabled={isCurrent || (selectedProvider !== null && modelInfo?.provider !== selectedProvider)}
+                      disabled={isCurrent}
                       className={cn(
                         "w-full text-left px-2.5 py-1.5 text-xs font-mono transition-colors",
                         "flex items-center gap-1.5",
                         isCurrent
                           ? "bg-foreground/10 text-foreground cursor-default"
-                          : "text-muted-foreground hover:bg-foreground/5 cursor-pointer",
-                        selectedProvider !== null &&
-                          modelInfo?.provider !== selectedProvider &&
-                          "opacity-50 cursor-not-allowed",
+                          : willSwitchProvider
+                            ? "text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 cursor-pointer"
+                            : "text-muted-foreground hover:bg-foreground/5 cursor-pointer",
                       )}
                       title={
-                        selectedProvider !== null && modelInfo?.provider !== selectedProvider
-                          ? "Switching providers not yet supported in UI (use Config page)"
-                          : isCurrent
-                            ? "Currently active"
-                            : "Click to apply (Tier 2 will live-switch; Tier 1 is view-only)"
+                        isCurrent
+                          ? "Currently active"
+                          : willSwitchProvider
+                            ? `Switch to ${m.id} via ${selectedProvider} (changes provider)`
+                            : `Switch to ${m.id} (same provider)`
                       }
                     >
                       <span
