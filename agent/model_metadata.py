@@ -72,6 +72,24 @@ _MODEL_CACHE_TTL = 3600
 _endpoint_model_metadata_cache: Dict[str, Dict[str, Dict[str, Any]]] = {}
 _endpoint_model_metadata_cache_time: Dict[str, float] = {}
 _ENDPOINT_MODEL_CACHE_TTL = 300
+# Cap on the endpoint cache to bound memory growth in long-lived processes
+# (memory leak fix: original cache grew by unique base URL with no eviction)
+_ENDPOINT_MODEL_CACHE_MAX = 32
+
+
+def _store_endpoint_cache(normalized_url: str, cache: Dict[str, Dict[str, Any]]) -> None:
+    """Store cache for *normalized_url* with LRU eviction when over the cap."""
+    _endpoint_model_metadata_cache[normalized_url] = cache
+    _endpoint_model_metadata_cache_time[normalized_url] = time.time()
+    if len(_endpoint_model_metadata_cache) > _ENDPOINT_MODEL_CACHE_MAX:
+        # Evict ~25% of oldest entries by timestamp
+        sorted_keys = sorted(
+            _endpoint_model_metadata_cache_time,
+            key=_endpoint_model_metadata_cache_time.get,
+        )
+        for key in sorted_keys[: _ENDPOINT_MODEL_CACHE_MAX // 4]:
+            _endpoint_model_metadata_cache.pop(key, None)
+            _endpoint_model_metadata_cache_time.pop(key, None)
 
 # Descending tiers for context length probing when the model is unknown.
 # We start at 128K (a safe default for most modern models) and step down
@@ -552,6 +570,15 @@ def fetch_endpoint_model_metadata(
 
             _endpoint_model_metadata_cache[normalized] = cache
             _endpoint_model_metadata_cache_time[normalized] = time.time()
+            # Evict oldest entries if we exceed the cap (memory leak fix)
+            if len(_endpoint_model_metadata_cache) > _ENDPOINT_MODEL_CACHE_MAX:
+                sorted_keys = sorted(
+                    _endpoint_model_metadata_cache_time,
+                    key=_endpoint_model_metadata_cache_time.get,
+                )
+                for key in sorted_keys[: _ENDPOINT_MODEL_CACHE_MAX // 4]:
+                    _endpoint_model_metadata_cache.pop(key, None)
+                    _endpoint_model_metadata_cache_time.pop(key, None)
             return cache
         except Exception as exc:
             last_error = exc
@@ -560,6 +587,15 @@ def fetch_endpoint_model_metadata(
         logger.debug("Failed to fetch model metadata from %s/models: %s", normalized, last_error)
     _endpoint_model_metadata_cache[normalized] = {}
     _endpoint_model_metadata_cache_time[normalized] = time.time()
+    # Evict oldest entries if we exceed the cap (memory leak fix)
+    if len(_endpoint_model_metadata_cache) > _ENDPOINT_MODEL_CACHE_MAX:
+        sorted_keys = sorted(
+            _endpoint_model_metadata_cache_time,
+            key=_endpoint_model_metadata_cache_time.get,
+        )
+        for key in sorted_keys[: _ENDPOINT_MODEL_CACHE_MAX // 4]:
+            _endpoint_model_metadata_cache.pop(key, None)
+            _endpoint_model_metadata_cache_time.pop(key, None)
     return {}
 
 

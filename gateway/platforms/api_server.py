@@ -31,7 +31,7 @@ import re
 import sqlite3
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 try:
     from aiohttp import web
@@ -395,6 +395,7 @@ class APIServerAdapter(BasePlatformAdapter):
         # Creation timestamps for orphaned-run TTL sweep
         self._run_streams_created: Dict[str, float] = {}
         self._session_db: Optional[Any] = None  # Lazy-init SessionDB for session continuity
+        self._background_tasks: Set["asyncio.Task"] = set()  # Tracked async tasks for clean shutdown
 
     @staticmethod
     def _parse_cors_origins(value: Any) -> tuple[str, ...]:
@@ -1920,6 +1921,24 @@ class APIServerAdapter(BasePlatformAdapter):
             await self._runner.cleanup()
             self._runner = None
         self._app = None
+
+        # Cancel tracked background tasks
+        if hasattr(self, "_background_tasks"):
+            for task in list(self._background_tasks):
+                if not task.done():
+                    task.cancel()
+            if self._background_tasks:
+                await asyncio.gather(*self._background_tasks, return_exceptions=True)
+            self._background_tasks.clear()
+
+        # Close SQLite response store (releases WAL/SHM file handles)
+        if self._response_store is not None:
+            try:
+                self._response_store.close()
+            except Exception as e:
+                logger.debug("[%s] ResponseStore close failed: %s", self.name, e)
+            self._response_store = None
+
         logger.info("[%s] API server stopped", self.name)
 
     async def send(

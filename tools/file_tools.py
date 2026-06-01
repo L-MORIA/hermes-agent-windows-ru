@@ -289,12 +289,39 @@ def _get_file_ops(task_id: str = "default") -> ShellFileOperations:
 
 
 def clear_file_ops_cache(task_id: str = None):
-    """Clear the file operations cache."""
+    """Clear the file operations cache and the read tracker."""
     with _file_ops_lock:
         if task_id:
             _file_ops_cache.pop(task_id, None)
         else:
             _file_ops_cache.clear()
+    # Also drop per-task read tracking (memory leak fix)
+    clear_read_tracker(task_id)
+
+
+# Cap on _read_tracker size to bound memory in long-lived gateways
+_READ_TRACKER_MAX_TASKS = 256
+
+
+def _evict_oldest_read_tracker_entries():
+    """Evict oldest entries from _read_tracker when it exceeds the cap."""
+    with _read_tracker_lock:
+        if len(_read_tracker) <= _READ_TRACKER_MAX_TASKS:
+            return
+        # Drop ~25% of oldest entries (insertion-ordered dict)
+        excess = len(_read_tracker) - _READ_TRACKER_MAX_TASKS
+        to_drop = max(1, excess + _READ_TRACKER_MAX_TASKS // 4)
+        for key in list(_read_tracker.keys())[:to_drop]:
+            _read_tracker.pop(key, None)
+
+
+def clear_read_tracker(task_id: str = None):
+    """Clear the per-task read tracker (dedup + read_history)."""
+    with _read_tracker_lock:
+        if task_id is None:
+            _read_tracker.clear()
+        else:
+            _read_tracker.pop(task_id, None)
 
 
 def read_file_tool(path: str, offset: int = 1, limit: int = 500, task_id: str = "default") -> str:
@@ -357,6 +384,9 @@ def read_file_tool(path: str, offset: int = 1, limit: int = 500, task_id: str = 
                 "last_key": None, "consecutive": 0,
                 "read_history": set(), "dedup": {},
             })
+            # Evict oldest entries if we've exceeded the cap (memory leak fix)
+            if len(_read_tracker) > _READ_TRACKER_MAX_TASKS:
+                _read_tracker.pop(next(iter(_read_tracker)), None)
             cached_mtime = task_data.get("dedup", {}).get(dedup_key)
 
         if cached_mtime is not None:
@@ -663,6 +693,9 @@ def search_tool(pattern: str, target: str = "content", path: str = ".",
             task_data = _read_tracker.setdefault(task_id, {
                 "last_key": None, "consecutive": 0, "read_history": set(),
             })
+            # Evict oldest entries if we've exceeded the cap (memory leak fix)
+            if len(_read_tracker) > _READ_TRACKER_MAX_TASKS:
+                _read_tracker.pop(next(iter(_read_tracker)), None)
             if task_data["last_key"] == search_key:
                 task_data["consecutive"] += 1
             else:
