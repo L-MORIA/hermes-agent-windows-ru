@@ -501,7 +501,18 @@ def _resolve_openrouter_runtime(
             return pool_result
 
     if effective_provider == "custom" and not api_key and not _is_openrouter_url:
-        api_key = ""
+        # Local servers (LM Studio, Ollama, vLLM) don't require authentication,
+        # but the OpenAI SDK insists on a non-empty api_key string.  Use a
+        # placeholder so the client can initialize; the actual HTTP call to
+        # the local server will succeed regardless.
+        try:
+            from agent.model_metadata import is_local_endpoint
+            if base_url and is_local_endpoint(base_url):
+                api_key = "no-key-required"
+            else:
+                api_key = ""
+        except Exception:
+            api_key = ""
 
     return {
         "provider": effective_provider,
