@@ -1,0 +1,121 @@
+name: Auto-sync from donor fork
+
+on:
+  schedule:
+    - cron: '0 13 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    name: Sync donor → fork
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git + donor remote
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add donor https://github.com/pengchengxia75-arch/hermes-agent-windows.git
+          git fetch donor
+
+      - name: Count new commits from donor
+        id: check
+        run: |
+          NEW=$(git rev-list --count main..donor/main)
+          echo "new=$NEW" >> "$GITHUB_OUTPUT"
+          if [ "$NEW" = "0" ]; then
+            echo "No new commits from donor, exiting."
+          else
+            echo "Found $NEW new commit(s) from donor."
+          fi
+
+      - name: Create sync branch
+        if: steps.check.outputs.new != '0'
+        run: |
+          BRANCH="sync/donor-$(date -u +%Y-%m-%d)"
+          echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
+          git checkout -b "$BRANCH"
+
+      - name: Merge donor into sync branch
+        if: steps.check.outputs.new != '0'
+        id: merge
+        continue-on-error: true
+        run: |
+          git merge donor/main --no-ff --no-edit \
+            -m "Auto-sync: merge pengchengxia75-arch/hermes-agent-windows@$(date -u +%Y-%m-%d)" \
+            || echo "::warning::Merge has conflicts; PR will be created with conflict markers for manual resolution."
+
+      - name: Push sync branch
+        if: steps.check.outputs.new != '0'
+        run: git push -u origin "$BRANCH"
+
+      - name: Build commit list for PR body
+        if: steps.check.outputs.new != '0'
+        id: log
+        run: |
+          {
+            echo "COMMITS<<EOF"
+            git log --pretty=format:'- %h %s (%an, %ad)' --date=short main..donor/main
+            echo ""
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create or update PR
+        if: steps.check.outputs.new != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branch = process.env.BRANCH;
+            const commits = process.env.COMMITS || '';
+            const hasConflicts = '${{ steps.merge.outcome }}' === 'failure';
+            const { owner, repo } = context.repo;
+            const head = `${owner}:${branch}`;
+
+            const { data: prs } = await github.rest.pulls.list({
+              owner, repo, state: 'open', head, base: 'main'
+            });
+
+            const conflictNote = hasConflicts
+              ? '\n> ⚠️ **Merge has conflicts.** Pull this branch locally, resolve, push, then merge the PR.\n'
+              : '';
+
+            const body =
+              `Auto-generated daily sync from [pengchengxia75-arch/hermes-agent-windows](https://github.com/pengchengxia75-arch/hermes-agent-windows).\n` +
+              conflictNote + `\n` +
+              `### New commits from donor\n\n${commits}\n\n` +
+              `### Review checklist\n` +
+              `- [ ] No breaking changes from donor that conflict with this fork's adaptations\n` +
+              `- [ ] Conflicts (if any) are resolved\n` +
+              `- [ ] Local-only files (CHANGELOG.md, *.bat, RUSSIAN_*, WINDOWS_TROUBLESHOOTING.md) are not overwritten\n\n` +
+              `Trigger: \`${context.eventName}\``;
+
+            const title = `🔄 Auto-sync donor (${new Date().toISOString().split('T')[0]})`;
+
+            if (prs.length > 0) {
+              await github.rest.pulls.update({
+                owner, repo, pull_number: prs[0].number, body, title
+              });
+              core.notice(`Updated PR #${prs[0].number}: ${prs[0].html_url}`);
+            } else {
+              const { data: pr } = await github.rest.pulls.create({
+                owner, repo, title, head: branch, base: 'main', body
+              });
+              try {
+                await github.rest.issues.addLabels({
+                  owner, repo, issue_number: pr.number,
+                  labels: ['auto-sync']
+                });
+              } catch (e) {
+                core.info(`Label 'auto-sync' missing, skipping: ${e.message}`);
+              }
+              core.notice(`Created PR #${pr.number}: ${pr.html_url}`);
+            }
