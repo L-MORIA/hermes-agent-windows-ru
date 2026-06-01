@@ -543,9 +543,13 @@ def _normalize_config_for_web(config: Dict[str, Any]) -> Dict[str, Any]:
     config = dict(config)  # shallow copy
     model_val = config.get("model")
     if isinstance(model_val, dict):
-        # Extract context_length before flattening the dict
         ctx_len = model_val.get("context_length", 0)
-        config["model"] = model_val.get("default", model_val.get("name", ""))
+        config["model"] = (
+            model_val.get("default")
+            or model_val.get("name")
+            or model_val.get("model")
+            or ""
+        )
         config["model_context_length"] = ctx_len if isinstance(ctx_len, int) else 0
     else:
         config["model_context_length"] = 0
@@ -939,11 +943,55 @@ def _denormalize_config_from_web(config: Dict[str, Any]) -> Dict[str, Any]:
     return config
 
 
+def _validate_model_provider(model_field: Any) -> Optional[str]:
+    """Reject (provider, model) pairs that the runtime will 404 on.
+
+    Returns None when valid (or when validation is not applicable, e.g. local
+    providers like custom / lmstudio / ollama-local where the user supplies
+    whatever their local server has loaded).
+    """
+    if not isinstance(model_field, dict):
+        return None
+    provider = (model_field.get("provider") or "").strip()
+    model = (model_field.get("model") or "").strip()
+    if not provider or not model:
+        return None
+
+    if provider in ("custom", "lmstudio", "ollama-local", "lm-studio", "ollama"):
+        return None
+
+    try:
+        from hermes_cli.models import _PROVIDER_MODELS
+        curated = list(_PROVIDER_MODELS.get(provider, []))
+    except Exception:
+        return None
+    if not curated:
+        return None
+
+    if model in curated:
+        return None
+
+    sample = ", ".join(curated[:5])
+    extra = f" (+{len(curated) - 5} more)" if len(curated) > 5 else ""
+    return (
+        f"Model '{model}' is not available in provider '{provider}'. "
+        f"Available models: {sample}{extra}. "
+        f"Pick a model from the dropdown, or switch to a local provider "
+        f"(custom / lmstudio / ollama-local) to use a model hosted on your own server."
+    )
+
+
 @app.put("/api/config")
 async def update_config(body: ConfigUpdate):
     try:
-        save_config(_denormalize_config_from_web(body.config))
+        normalized = _denormalize_config_from_web(body.config)
+        err = _validate_model_provider(normalized.get("model"))
+        if err:
+            raise HTTPException(status_code=400, detail=err)
+        save_config(normalized)
         return {"ok": True}
+    except HTTPException:
+        raise
     except Exception as e:
         _log.exception("PUT /api/config failed")
         raise HTTPException(status_code=500, detail="Internal server error")
