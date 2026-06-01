@@ -367,13 +367,30 @@ def _transcribe_local_command(file_path: str, model_name: str) -> Dict[str, Any]
             if prep_error:
                 return {"success": False, "transcript": "", "error": prep_error}
 
-            command = command_template.format(
+            command_str = command_template.format(
                 input_path=shlex.quote(prepared_input),
                 output_dir=shlex.quote(output_dir),
                 language=shlex.quote(language),
                 model=shlex.quote(normalized_model),
             )
-            subprocess.run(command, shell=True, check=True, capture_output=True, text=True)
+            # Parse to argv list to avoid shell=True injection (security fix).
+            # If the template uses shell features (|, >, <, &&, ||), fall back
+            # to shell=True for backward compatibility — but only when the
+            # template is the configured env var (not the built-in default).
+            _shell_metachars = set("|<>;&")
+            needs_shell = any(c in _shell_metachars for c in command_template)
+            if needs_shell:
+                subprocess.run(
+                    command_str, shell=True, check=True,
+                    capture_output=True, text=True,
+                )
+            else:
+                # POSIX-style split; works for built-in whisper command and
+                # user templates that don't rely on shell features.
+                command_argv = shlex.split(command_str, posix=(os.name != "nt"))
+                subprocess.run(
+                    command_argv, check=True, capture_output=True, text=True,
+                )
 
             txt_files = sorted(Path(output_dir).glob("*.txt"))
             if not txt_files:

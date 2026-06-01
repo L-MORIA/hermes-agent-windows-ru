@@ -692,6 +692,33 @@ class DiscordAdapter(BasePlatformAdapter):
             except asyncio.CancelledError:
                 pass
 
+        # Cancel and drain the bot task wrapper (memory leak fix).
+        # The discord client's close() returns when the client itself exits,
+        # but does not cancel the wrapping _bot_task that wraps _client.start().
+        if self._bot_task and not self._bot_task.done():
+            self._bot_task.cancel()
+            try:
+                await self._bot_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        self._bot_task = None
+
+        # Cancel all per-channel typing indicator tasks (memory leak fix).
+        for task in list(self._typing_tasks.values()):
+            if not task.done():
+                task.cancel()
+        if self._typing_tasks:
+            await asyncio.gather(*self._typing_tasks.values(), return_exceptions=True)
+        self._typing_tasks.clear()
+
+        # Cancel all pending text batch tasks (memory leak fix).
+        for task in list(self._pending_text_batch_tasks.values()):
+            if not task.done():
+                task.cancel()
+        if self._pending_text_batch_tasks:
+            await asyncio.gather(*self._pending_text_batch_tasks.values(), return_exceptions=True)
+        self._pending_text_batch_tasks.clear()
+
         self._running = False
         self._client = None
         self._ready_event.clear()
