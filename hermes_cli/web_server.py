@@ -572,6 +572,7 @@ async def get_schema():
 _EMPTY_MODEL_INFO: dict = {
     "model": "",
     "provider": "",
+    "base_url": "",
     "auto_context_length": 0,
     "config_context_length": 0,
     "effective_context_length": 0,
@@ -646,6 +647,7 @@ def get_model_info():
         return {
             "model": model_name,
             "provider": provider,
+            "base_url": base_url,
             "auto_context_length": auto_ctx,
             "config_context_length": config_ctx_int,
             "effective_context_length": effective_ctx,
@@ -716,25 +718,56 @@ def list_all_providers():
         # 2) Custom endpoint (user-configured base_url)
         cfg = load_config()
         model_cfg = cfg.get("model", "")
+        custom_url = ""
+        custom_provider = ""
         if isinstance(model_cfg, dict):
             custom_url = model_cfg.get("base_url", "")
             custom_provider = model_cfg.get("provider", "")
-            if custom_url and custom_provider == "custom":
-                server_type = "unknown"
-                if is_local_endpoint(custom_url):
-                    try:
-                        server_type = detect_local_server_type(custom_url) or "local"
-                    except Exception:
-                        server_type = "local"
-                out.append({
-                    "id": "custom",
-                    "display_name": f"Custom endpoint ({server_type})",
-                    "type": "local" if server_type != "unknown" else "remote",
-                    "has_credentials": True,
-                    "base_url": custom_url,
-                    "credential_env_var": None,
-                    "auth_type": "api_key",
-                })
+
+        # 2a) Virtual "LM Studio" entry — always shown, no credentials needed.
+        # When user picks this, ChatPage saves as provider="custom" with the
+        # base_url (so runtime_provider's existing custom path handles it).
+        lmstudio_url = custom_url if custom_provider == "custom" and is_local_endpoint(custom_url) else "http://localhost:1234/v1"
+        out.append({
+            "id": "lmstudio",
+            "display_name": "LM Studio",
+            "type": "local",
+            "has_credentials": True,  # no creds needed
+            "base_url": lmstudio_url,
+            "credential_env_var": None,
+            "auth_type": "none",
+        })
+
+        # 2b) "Ollama (local)" virtual entry — local server, no creds
+        ollama_url = custom_url if custom_provider == "custom" and is_local_endpoint(custom_url) else "http://localhost:11434/v1"
+        out.append({
+            "id": "ollama-local",
+            "display_name": "Ollama (local)",
+            "type": "local",
+            "has_credentials": True,
+            "base_url": ollama_url,
+            "credential_env_var": None,
+            "auth_type": "none",
+        })
+
+        # 3) Custom endpoint (user-configured base_url) — only show if not
+        # already represented by lmstudio/ollama-local above
+        if custom_url and custom_provider == "custom":
+            server_type = "unknown"
+            if is_local_endpoint(custom_url):
+                try:
+                    server_type = detect_local_server_type(custom_url) or "local"
+                except Exception:
+                    server_type = "local"
+            out.append({
+                "id": "custom",
+                "display_name": f"Custom endpoint ({server_type})",
+                "type": "local" if server_type != "unknown" else "remote",
+                "has_credentials": True,
+                "base_url": custom_url,
+                "credential_env_var": None,
+                "auth_type": "api_key",
+            })
 
         return {"providers": out}
 

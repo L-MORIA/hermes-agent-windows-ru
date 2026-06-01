@@ -350,6 +350,7 @@ export interface SessionSearchResponse {
 export interface ModelInfoResponse {
   model: string;
   provider: string;
+  base_url?: string;
   auto_context_length: number;
   config_context_length: number;
   effective_context_length: number;

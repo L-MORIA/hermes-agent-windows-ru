@@ -111,7 +111,13 @@ export default function ChatPage() {
             : "";
 
         let modelField: unknown;
-        if (newProvider === currentProvider) {
+        // Virtual local providers (lmstudio, ollama-local) all map to "custom"
+        // at the config level — compare effective providers for same/cross detection.
+        const localVirtualNew = newProvider === "lmstudio" || newProvider === "ollama-local";
+        const localVirtualCur = currentProvider === "lmstudio" || currentProvider === "ollama-local";
+        const effectiveNew = localVirtualNew ? "custom" : newProvider;
+        const effectiveCur = localVirtualCur ? "custom" : currentProvider;
+        if (effectiveNew === effectiveCur) {
           // Same provider — keep existing dict form, just change the model name
           if (typeof currentModelField === "object" && currentModelField !== null) {
             modelField = { ...(currentModelField as Record<string, unknown>), model: newModel };
@@ -119,11 +125,12 @@ export default function ChatPage() {
             modelField = newModel;
           }
         } else {
-          // Cross-provider — build a full {provider, model, base_url?} dict
-          // For "custom" / "lmstudio" — preserve existing base_url (user's local server)
-          // For ollama-cloud / cloud providers — base_url comes from registry default
-          const dict: Record<string, unknown> = { provider: newProvider, model: newModel };
-          if (newProvider === "custom" && currentBaseUrl) {
+          // Cross-provider — build a full {provider, model, base_url?} dict.
+          // Virtual local providers (lmstudio / ollama-local) are mapped to
+          // "custom" so the existing runtime_provider path handles them.
+          const dict: Record<string, unknown> = { provider: effectiveNew, model: newModel };
+          // Preserve base_url for "custom" / local virtual providers
+          if (effectiveNew === "custom" && currentBaseUrl) {
             dict.base_url = currentBaseUrl;
           }
           modelField = dict;
@@ -134,7 +141,7 @@ export default function ChatPage() {
         setCurrentModel(newModel);
         setModelSwitchKey((k) => k + 1);
         const toastMsg =
-          newProvider !== currentProvider
+          effectiveNew !== effectiveCur
             ? `Switched to ${newProvider}/${newModel} (will apply to new sessions)`
             : `Model set to ${newModel} (will apply to new sessions)`;
         showToast(toastMsg, "success");

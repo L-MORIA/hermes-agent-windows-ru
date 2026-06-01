@@ -59,9 +59,19 @@ export function ModelSelector({
         if (cancelled) return;
         if (provResp) {
           setProviders(provResp.providers);
-          // Auto-select the configured provider
+          // Auto-select: if current is "custom" with a local URL, default
+          // to the lmstudio/ollama-local virtual entry that matches.
           if (info?.provider) {
-            setSelectedProvider(info.provider);
+            let p = info.provider;
+            if (p === "custom" && info.base_url) {
+              const url = info.base_url.toLowerCase();
+              if (url.includes("1234") || url.includes("lm-studio") || url.includes("lmstudio")) {
+                p = "lmstudio";
+              } else if (url.includes("11434") || url.includes("ollama")) {
+                p = "ollama-local";
+              }
+            }
+            setSelectedProvider(p);
           }
         }
         if (info) setModelInfo(info);
