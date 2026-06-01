@@ -656,6 +656,203 @@ def get_model_info():
         return dict(_EMPTY_MODEL_INFO)
 
 
+@app.get("/api/providers/all")
+def list_all_providers():
+    """List all available providers (canonical + custom + local endpoints).
+
+    Returns each provider's:
+    - id (canonical slug or "lmstudio" / "ollama-local" for live-detected)
+    - display_name
+    - type: "remote" | "local" | "custom"
+    - has_credentials: bool
+    - base_url (if known)
+    - credential_env_var: which env var the user should set
+
+    Used by the model selector dropdown in the web UI to show all
+    available providers regardless of whether they have credentials yet.
+    """
+    try:
+        from hermes_cli.providers import HERMES_OVERLAYS
+        from hermes_cli.auth import PROVIDER_REGISTRY
+        from hermes_cli.models import CANONICAL_PROVIDERS, _PROVIDER_LABELS
+        from agent.model_metadata import detect_local_server_type, is_local_endpoint
+
+        out = []
+
+        # 1) Canonical providers (with credentials)
+        for entry in CANONICAL_PROVIDERS:
+            slug = entry.slug
+            registry = PROVIDER_REGISTRY.get(slug)
+            overlay = HERMES_OVERLAYS.get(slug)
+            env_vars = list(registry.api_key_env_vars) if registry else []
+            base_url = ""
+            if registry and registry.inference_base_url:
+                base_url = registry.inference_base_url
+            elif overlay and overlay.base_url_override:
+                base_url = overlay.base_url_override
+
+            has_credentials = False
+            for v in env_vars:
+                if os.getenv(v):
+                    has_credentials = True
+                    break
+
+            # OAuth providers don't need API key env var
+            if not has_credentials and registry and registry.auth_type in (
+                "oauth_device_code", "oauth_external"
+            ):
+                has_credentials = True  # assume auth may exist in env elsewhere
+
+            out.append({
+                "id": slug,
+                "display_name": entry.label,
+                "type": "remote",
+                "has_credentials": has_credentials,
+                "base_url": base_url,
+                "credential_env_var": env_vars[0] if env_vars else None,
+                "auth_type": registry.auth_type if registry else "api_key",
+            })
+
+        # 2) Custom endpoint (user-configured base_url)
+        cfg = load_config()
+        model_cfg = cfg.get("model", "")
+        if isinstance(model_cfg, dict):
+            custom_url = model_cfg.get("base_url", "")
+            custom_provider = model_cfg.get("provider", "")
+            if custom_url and custom_provider == "custom":
+                server_type = "unknown"
+                if is_local_endpoint(custom_url):
+                    try:
+                        server_type = detect_local_server_type(custom_url) or "local"
+                    except Exception:
+                        server_type = "local"
+                out.append({
+                    "id": "custom",
+                    "display_name": f"Custom endpoint ({server_type})",
+                    "type": "local" if server_type != "unknown" else "remote",
+                    "has_credentials": True,
+                    "base_url": custom_url,
+                    "credential_env_var": None,
+                    "auth_type": "api_key",
+                })
+
+        return {"providers": out}
+
+    except Exception:
+        _log.exception("GET /api/providers/all failed")
+        return {"providers": []}
+
+
+@app.get("/api/models/available")
+def list_available_models(provider: Optional[str] = None):
+    """List models available for a given provider.
+
+    For local servers (lmstudio / ollama-local) — live-fetch from the server.
+    For cloud providers — return curated list from _PROVIDER_MODELS.
+
+    Args:
+        provider: canonical provider slug, or "lmstudio" / "ollama-local"
+                  for live detection. If None, uses the currently configured
+                  provider from config.yaml.
+    """
+    try:
+        from hermes_cli.models import (
+            CANONICAL_PROVIDERS, _PROVIDER_MODELS, _PROVIDER_LABELS,
+        )
+        from hermes_cli.auth import PROVIDER_REGISTRY
+
+        cfg = load_config()
+        model_cfg = cfg.get("model", "")
+        configured_base_url = ""
+        configured_provider = ""
+        if isinstance(model_cfg, dict):
+            configured_base_url = model_cfg.get("base_url", "")
+            configured_provider = model_cfg.get("provider", "")
+
+        # Resolve target provider
+        if not provider:
+            if isinstance(model_cfg, dict):
+                provider = model_cfg.get("provider", "")
+            if not provider:
+                provider = configured_provider or "custom"
+
+        # Live fetch for local servers (incl. user-configured "custom" base_url)
+        if provider in ("lmstudio", "ollama-local", "ollama", "custom"):
+            # Detect server type for the user-configured base_url
+            detected_kind = None
+            try:
+                from agent.model_metadata import detect_local_server_type
+                if configured_base_url:
+                    detected_kind = detect_local_server_type(configured_base_url)
+            except Exception:
+                pass
+
+            # Try LM Studio first
+            try:
+                from tools.lmstudio_utils import list_models
+                if configured_base_url and (provider == "lmstudio" or detected_kind in ("lmstudio", "lm-studio")):
+                    models = list_models(configured_base_url)
+                    return {
+                        "provider": "lmstudio",
+                        "source": "live",
+                        "models": [
+                            {
+                                "id": m["id"],
+                                "display_name": m.get("display_name") or m["id"],
+                                "loaded": m.get("state") == "loaded",
+                            }
+                            for m in models
+                        ],
+                    }
+            except Exception:
+                pass
+            # Try Ollama local
+            try:
+                if configured_base_url and (provider in ("ollama-local", "ollama") or detected_kind == "ollama"):
+                    ollama_url = configured_base_url.rstrip('/').replace('/v1', '') + '/api/tags'
+                    with urllib.request.urlopen(ollama_url, timeout=5) as resp:
+                        tags = json.loads(resp.read().decode('utf-8')).get("models", [])
+                    return {
+                        "provider": "ollama-local",
+                        "source": "live",
+                        "models": [
+                            {
+                                "id": m["name"],
+                                "display_name": m.get("name"),
+                                "loaded": True,
+                            }
+                            for m in tags
+                        ],
+                    }
+            except Exception:
+                pass
+            return {"provider": provider, "source": "none", "models": []}
+
+        # Curated list for cloud providers
+        curated = list(_PROVIDER_MODELS.get(provider, []))
+        registry = PROVIDER_REGISTRY.get(provider)
+        label = _PROVIDER_LABELS.get(provider, provider)
+        if not curated and registry:
+            # Provider exists but no curated list — return empty (user picks manually)
+            return {
+                "provider": provider,
+                "source": "none",
+                "display_name": label,
+                "models": [],
+            }
+
+        return {
+            "provider": provider,
+            "source": "curated",
+            "display_name": label,
+            "models": [{"id": m, "display_name": m, "loaded": True} for m in curated],
+        }
+
+    except Exception:
+        _log.exception("GET /api/models/available failed")
+        return {"provider": provider or "unknown", "source": "error", "models": []}
+
+
 def _denormalize_config_from_web(config: Dict[str, Any]) -> Dict[str, Any]:
     """Reverse _normalize_config_for_web before saving.
 

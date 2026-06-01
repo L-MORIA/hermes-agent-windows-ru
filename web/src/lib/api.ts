@@ -58,6 +58,11 @@ export const api = {
   getDefaults: () => fetchJSON<Record<string, unknown>>("/api/config/defaults"),
   getSchema: () => fetchJSON<{ fields: Record<string, unknown>; category_order: string[] }>("/api/config/schema"),
   getModelInfo: () => fetchJSON<ModelInfoResponse>("/api/model/info"),
+  getProviders: () => fetchJSON<ProvidersResponse>("/api/providers/all"),
+  getAvailableModels: (provider: string) =>
+    fetchJSON<AvailableModelsResponse>(
+      `/api/models/available?provider=${encodeURIComponent(provider)}`,
+    ),
   saveConfig: (config: Record<string, unknown>) =>
     fetchJSON<{ ok: boolean }>("/api/config", {
       method: "PUT",
@@ -356,6 +361,35 @@ export interface ModelInfoResponse {
     max_output_tokens?: number;
     model_family?: string;
   };
+}
+
+// ── Provider / model selector types ───────────────────────────────────
+
+export interface ProviderInfo {
+  id: string;
+  display_name: string;
+  type: "remote" | "local" | "custom";
+  has_credentials: boolean;
+  base_url: string;
+  credential_env_var: string | null;
+  auth_type: string;
+}
+
+export interface ProvidersResponse {
+  providers: ProviderInfo[];
+}
+
+export interface AvailableModel {
+  id: string;
+  display_name: string;
+  loaded: boolean;
+}
+
+export interface AvailableModelsResponse {
+  provider: string;
+  source: "live" | "curated" | "none" | "error";
+  display_name?: string;
+  models: AvailableModel[];
 }
 
 // ── OAuth provider types ────────────────────────────────────────────────

@@ -141,6 +141,11 @@ HERMES_OVERLAYS: Dict[str, HermesOverlay] = {
         base_url_override="https://api.arcee.ai/api/v1",
         base_url_env_var="ARCEE_BASE_URL",
     ),
+    "ollama-cloud": HermesOverlay(
+        transport="openai_chat",
+        base_url_override="https://ollama.com/v1",
+        base_url_env_var="OLLAMA_BASE_URL",
+    ),
 }
 
 

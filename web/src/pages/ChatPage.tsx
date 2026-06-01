@@ -3,6 +3,9 @@ import { Bot, Send, Plus, Zap, RotateCcw, MessageSquare, ChevronLeft, ChevronRig
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { useI18n } from "@/i18n/context";
+import { useToast } from "@/hooks/useToast";
+import { Toast } from "@/components/Toast";
+import { ModelSelector } from "@/components/ModelSelector";
 import type { SessionInfo, SessionMessage } from "@/lib/api";
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -39,10 +42,13 @@ export default function ChatPage() {
   const [input,     setInput]     = useState("");
   const [streaming, setStreaming] = useState(false);
   const [agentInfo, setAgentInfo] = useState("");
+  const [currentModel, setCurrentModel] = useState<string>("");
+  const [modelSwitchKey, setModelSwitchKey] = useState(0);
   const historyRef  = useRef<{ role: string; content: string }[]>(saved.history);
   const bottomRef   = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef    = useRef<AbortController | null>(null);
+  const { toast, showToast } = useToast();
 
   // sidebar state
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
@@ -80,12 +86,31 @@ export default function ChatPage() {
     fetch("/api/status").then(r => r.json()).then(d => {
       if (d.gateway_running) {
         const m = d.active_model || "", p = d.active_provider || "";
+        setCurrentModel(m);
         setAgentInfo(m || p ? `${m}${p ? " · " + p : ""} · ${t.chat.agentConnected}` : `Agent ${t.chat.agentConnected}`);
       } else {
         setAgentInfo(`⚠ ${t.chat.gatewayNotRunning}`);
       }
     }).catch(() => setAgentInfo(`⚠ ${t.chat.apiNotReachable}`));
   }, [t]);
+
+  // ── Model selector handler (Tier 1: same-provider model change) ──
+  const handleModelChange = useCallback(
+    async (newModel: string) => {
+      try {
+        // Read current model config so we preserve provider/base_url/api_mode
+        const cfg = (await api.getConfig()) as { model?: unknown };
+        const updated = { ...cfg, model: newModel };
+        await api.saveConfig(updated);
+        setCurrentModel(newModel);
+        setModelSwitchKey((k) => k + 1);
+        showToast(`Model set to ${newModel} (will apply to new sessions)`, "success");
+      } catch (e) {
+        showToast(`Failed to switch model: ${(e as Error).message}`, "error");
+      }
+    },
+    [showToast],
+  );
 
   // ── Auto-scroll ──
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
@@ -337,6 +362,13 @@ export default function ChatPage() {
             {activeId ? sessionTitle(sessions.find(s => s.id === activeId) ?? {} as SessionInfo) : t.chat.newChat}
           </span>
 
+          <ModelSelector
+            currentModel={currentModel}
+            refreshKey={modelSwitchKey}
+            onChange={handleModelChange}
+            disabled={streaming}
+          />
+
           <Button variant="ghost" size="sm" onClick={newChat} className="h-7 gap-1 text-xs shrink-0">
             <Plus className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">{t.chat.newChat}</span>
@@ -446,6 +478,7 @@ export default function ChatPage() {
         </div>
 
       </div>
+      {toast && <Toast toast={toast} />}
     </div>
   );
 }
