@@ -6,10 +6,22 @@ set "PROJ_DIR=C:\Users\User\PycharmProjects\HERMES AGENT\hermes-agent-windows-ru
 set "HERMES_HOME=%USERPROFILE%\.hermes"
 
 cls
-echo.
 echo ==========================================
 echo     Hermes Agent Web UI Launcher
 echo ==========================================
+echo Timestamp: %DATE% %TIME%
+echo.
+
+:: --- Kill previous processes ---
+echo [PRE] Killing previous Hermes processes...
+echo         Ports: 8642 (gateway), 9119 (webui)
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr /c:":8642 " ^| findstr LISTENING 2^>nul') do taskkill /F /PID %%a >nul 2>&1
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr /c:":9119 " ^| findstr LISTENING 2^>nul') do taskkill /F /PID %%a >nul 2>&1
+del /q "%HERMES_HOME%\gateway.pid" 2>nul
+del /q "%HERMES_HOME%\gateway.lock" 2>nul
+del /q "%HERMES_HOME%\webui.pid" 2>nul
+del /q "%HERMES_HOME%\webui.lock" 2>nul
+timeout /t 2 /nobreak >nul
 echo.
 
 :: Check venv
@@ -17,7 +29,7 @@ if not exist "%PROJ_DIR%\venv\Scripts\python.exe" (
     echo [ERROR] Virtual environment not found!
     echo         Expected: %PROJ_DIR%\venv\Scripts\python.exe
     echo.
-    echo Solution: Run these commands in PowerShell:
+    echo Solution: Create venv first:
     echo   cd /d "%PROJ_DIR%"
     echo   python -m venv venv
     echo   .\venv\Scripts\pip install -e .
@@ -25,30 +37,25 @@ if not exist "%PROJ_DIR%\venv\Scripts\python.exe" (
     exit /b 1
 )
 
-:: Kill stale processes
-echo [1/4] Cleaning stale processes...
-taskkill /F /IM python.exe >nul 2>&1
-timeout /t 2 /nobreak >nul
-
-:: Remove stale PID files
-for %%f in (gateway.pid gateway.lock webui.pid webui.lock) do (
-    if exist "%HERMES_HOME%\%%f" del /q "%HERMES_HOME%\%%f" 2>nul
-)
-
 :: Set environment
-echo [2/4] Setting environment...
+echo [1/3] Setting environment...
 set PYTHONIOENCODING=utf-8
 set API_SERVER_ENABLED=true
 
-:: Launch server
-echo [3/4] Starting Hermes Agent Web UI...
-echo [4/4] Opening browser...
+:: Launch
+echo [2/3] Starting Hermes Agent Web UI...
+echo [3/3] Opening browser...
 cd /d "%PROJ_DIR%"
 
-:: Open browser
 start "" http://localhost:9119 2>nul
 
-:: Run server (this window stays open)
+echo.
+echo ==========================================
+echo  Hermes Agent is running.
+echo  Close this window to stop the server.
+echo ==========================================
+echo.
+
 "%PROJ_DIR%\venv\Scripts\python.exe" -m hermes_cli.main web
 
 echo.

@@ -536,6 +536,14 @@ class APIServerAdapter(BasePlatformAdapter):
 
         max_iterations = int(os.getenv("HERMES_MAX_ITERATIONS", "90"))
 
+        # Read max_tokens from config or default to 65536 for local models
+        # (LM Studio defaults are often ~2048 which truncates long responses).
+        _agent_cfg = user_config.get("agent", {})
+        if isinstance(_agent_cfg, dict):
+            max_tokens = _agent_cfg.get("max_tokens", 65536)
+        else:
+            max_tokens = 65536
+
         # Load fallback provider chain so the API server platform has the
         # same fallback behaviour as Telegram/Discord/Slack (fixes #4954).
         from gateway.run import GatewayRunner
@@ -545,6 +553,7 @@ class APIServerAdapter(BasePlatformAdapter):
             model=model,
             **runtime_kwargs,
             max_iterations=max_iterations,
+            max_tokens=max_tokens,
             quiet_mode=True,
             verbose_logging=False,
             ephemeral_system_prompt=ephemeral_system_prompt or None,
@@ -785,10 +794,11 @@ class APIServerAdapter(BasePlatformAdapter):
             )
 
         idempotency_key = request.headers.get("Idempotency-Key")
+        _actual_model = None
         if idempotency_key:
             fp = _make_request_fingerprint(body, keys=["model", "messages", "tools", "tool_choice", "stream"])
             try:
-                result, usage = await _idem_cache.get_or_set(idempotency_key, fp, _compute_completion)
+                result, usage, _actual_model = await _idem_cache.get_or_set(idempotency_key, fp, _compute_completion)
             except Exception as e:
                 logger.error("Error running agent for chat completions: %s", e, exc_info=True)
                 return web.json_response(
@@ -797,7 +807,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 )
         else:
             try:
-                result, usage = await _compute_completion()
+                result, usage, _actual_model = await _compute_completion()
             except Exception as e:
                 logger.error("Error running agent for chat completions: %s", e, exc_info=True)
                 return web.json_response(
@@ -809,11 +819,15 @@ class APIServerAdapter(BasePlatformAdapter):
         if not final_response:
             final_response = result.get("error", "(No response generated)")
 
+        # Use the model that the agent actually used (may differ from
+        # config if LM Studio auto-sync updated it mid-conversation).
+        _effective_model = _actual_model or model_name
+
         response_data = {
             "id": completion_id,
             "object": "chat.completion",
             "created": created,
-            "model": model_name,
+            "model": _effective_model,
             "choices": [
                 {
                     "index": 0,
@@ -1491,8 +1505,11 @@ class APIServerAdapter(BasePlatformAdapter):
         """
         Create an agent and run a conversation in a thread executor.
 
-        Returns ``(result_dict, usage_dict)`` where *usage_dict* contains
-        ``input_tokens``, ``output_tokens`` and ``total_tokens``.
+        Returns ``(result_dict, usage_dict, effective_model)`` where
+        *usage_dict* contains ``input_tokens``, ``output_tokens`` and
+        ``total_tokens``, and *effective_model* is the model name that
+        the agent actually used (may differ from config due to LM Studio
+        auto-sync).
 
         If *agent_ref* is a one-element list, the AIAgent instance is stored
         at ``agent_ref[0]`` before ``run_conversation`` begins.  This allows
@@ -1520,7 +1537,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 "output_tokens": getattr(agent, "session_completion_tokens", 0) or 0,
                 "total_tokens": getattr(agent, "session_total_tokens", 0) or 0,
             }
-            return result, usage
+            return result, usage, agent.model
 
         return await loop.run_in_executor(None, _run)
 

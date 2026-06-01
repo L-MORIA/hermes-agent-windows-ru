@@ -7873,6 +7873,44 @@ class AIAgent:
                     )
             except Exception:
                 pass
+
+        # ── Sync model with LM Studio ─────────────────────────────────
+        # If the user manually switched the model in the LM Studio UI,
+        # the agent's self.model will be stale.  Check what LM Studio has
+        # loaded and sync config.yaml + self.model before the next request.
+        # Without this, LM Studio auto-loads the old model from the request.
+        #
+        # IMPORTANT: only auto-switch if the current agent model is NO LONGER
+        # loaded in LM Studio.  When multiple models are loaded (LLM swarm
+        # from auxiliary tasks like compression, approval), the LAST loaded
+        # model is often a tiny auxiliary model — we must NOT switch to it.
+        if (self.base_url and is_local_endpoint(self.base_url)
+                and self.api_mode == "chat_completions"):
+            try:
+                from tools.lmstudio_utils import list_models, auto_update_model_from_response
+                _all = list_models(self.base_url)
+                _loaded_list = [m["id"] for m in _all if m.get("state") == "loaded"]
+                logger.info(
+                    "LM Studio sync: current_agent_model=%s all_loaded=%s",
+                    self.model, _loaded_list,
+                )
+                # Only switch if current model is no longer loaded
+                if _loaded_list and self.model not in _loaded_list:
+                    # Use last loaded model as best guess for user's intent
+                    _new_model = _loaded_list[-1]
+                    logger.info(
+                        "Current model %s not loaded in LM Studio — "
+                        "auto-syncing to %s (from LM Studio)",
+                        self.model, _new_model,
+                    )
+                    self.model = _new_model
+                    auto_update_model_from_response(_new_model)
+                elif _loaded_list and self.model in _loaded_list:
+                    pass  # current model still loaded — keep it
+                elif not _loaded_list:
+                    logger.debug("LM Studio has no loaded models — skipping sync")
+            except Exception as exc:
+                logger.debug("LM Studio model sync failed: %s", exc)
         # Replay compression warning through status_callback for gateway
         # platforms (the callback was not wired during __init__).
         if self._compression_warning:
@@ -8623,6 +8661,20 @@ class AIAgent:
                                     f"{int(sleep_end - time.time())}s remaining"
                                 )
                         continue  # Retry the API call
+
+                    # ── Auto-detect LM Studio model change ──────────────────
+                    # If the user manually switched models in LM Studio while
+                    # the agent was running, the API response's "model" field
+                    # will differ from the configured model.  Silently update
+                    # config.yaml so the next session uses the correct model.
+                    if (self.api_mode == "chat_completions"
+                            and self.base_url
+                            and hasattr(response, "model") and response.model):
+                        try:
+                            from tools.lmstudio_utils import auto_update_model_from_response
+                            auto_update_model_from_response(str(response.model))
+                        except Exception:
+                            pass
 
                     # Check finish_reason before proceeding
                     if self.api_mode == "codex_responses":

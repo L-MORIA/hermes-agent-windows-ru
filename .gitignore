@@ -69,3 +69,6 @@ packaging/windows-installer/_repo_stage/
 *.log
 hermes-cwd-*.txt
 hermes-snap-*.sh
+
+# Temp test files
+test_context.py

@@ -453,6 +453,38 @@ def profile_env(tmp_path, monkeypatch):
     return home
 ```
 
+## LM Studio Auto Model Sync (Windows)
+
+On Windows with local LM Studio, the agent automatically syncs the model when the user switches it in the LM Studio UI.
+
+### How it works
+
+1. **Pre-request check** (`run_agent.py:7887-7910`): Before each API call, the agent queries LM Studio's `/api/v0/models` endpoint. If the current `self.model` is **not** in the loaded models list, it auto-switches to the last loaded model (user's most recent selection) and updates `config.yaml`.
+
+2. **Response-based detection** (`run_agent.py:8662-8680`): After each successful API call, if `response.model` differs from the configured model, the config file is silently updated.
+
+3. **Guard against auxiliary models**: The sync only triggers when the current model is NO LONGER loaded. This prevents switching to tiny swarm models (compression, approval, MCP) that LM Studio may auto-load in parallel.
+
+### Key functions
+
+- `tools/lmstudio_utils.py:get_loaded_model()` — returns the **last** (most recently) loaded model, or `None`. Changed from returning `models[0]` to `models[-1]` to respect user intent.
+- `tools/lmstudio_utils.py:list_models()` — returns all models from LM Studio with their states.
+- `tools/lmstudio_utils.py:auto_update_model_from_response()` — writes the model name to `config.yaml`.
+
+### API Server (gateway)
+
+- `gateway/platforms/api_server.py:537-553` — `_run_agent()` reads `agent.max_tokens` from config (default 65536 for LM Studio to prevent truncation).
+- `gateway/platforms/api_server.py:819-825` — response `model` field reflects the agent's actual model (post-sync), not the gateway's static `self._model_name`.
+
+## Windows Batch Files
+
+Two batch files for managing Hermes Agent on Windows:
+
+- **`hermes-webui.bat`** — Main launcher. Kills stale processes on ports 8642/9119, then starts the web UI. Double-click from desktop.
+- **`kill-hermes.bat`** — Standalone kill script. Kills processes on Hermes ports 8642/9119 and removes stale PID files. Run manually before restart.
+
+Both use `netstat -ano` to find and kill processes by port (not by `taskkill /IM python.exe`, which is too aggressive).
+
 ---
 
 ## Testing

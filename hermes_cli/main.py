@@ -673,8 +673,22 @@ def _resolve_session_by_name_or_id(name_or_id: str) -> Optional[str]:
     return None
 
 
+def _ensure_lmstudio_url():
+    """On Windows, auto-detect LM Studio URL if the configured one is unreachable."""
+    if os.name != "nt":
+        return
+    try:
+        from tools.lmstudio_utils import fix_config_url
+        fix_config_url()
+    except Exception as e:
+        logging.getLogger(__name__).warning("LM Studio URL detection failed: %s", e)
+
+
 def cmd_chat(args):
     """Run interactive chat CLI."""
+    # Auto-detect LM Studio URL if configured URL doesn't respond
+    _ensure_lmstudio_url()
+
     # Resolve --continue into --resume with the latest CLI session or by name
     continue_val = getattr(args, "continue_last", None)
     if continue_val and not getattr(args, "resume", None):
@@ -984,6 +998,9 @@ def cmd_setup(args):
 
 def cmd_web(args):
     """Launch the Hermes Agent Web UI dashboard."""
+    # Auto-detect LM Studio URL if configured URL doesn't respond
+    _ensure_lmstudio_url()
+
     port = getattr(args, "port", 9119)
     host = getattr(args, "host", "127.0.0.1")
     no_open = getattr(args, "no_open", False)
@@ -1084,15 +1101,9 @@ def cmd_web(args):
     except Exception:
         pass  # 预检查失败不影响 Web UI 启动
 
-    url = f"http://{host}:{port}"
-    print(f"Hermes Web UI: {url}")
-
-    if not no_open:
-        import threading, webbrowser
-        def _open():
-            import time; time.sleep(1.2)
-            webbrowser.open(url)
-        threading.Thread(target=_open, daemon=True).start()
+    url = f"http://127.0.0.1:{port}"
+    print(f"  Hermes Web UI: {url}")
+    print(f"  Откройте в браузере или дождитесь восстановления вкладки из сессии.")
 
     from hermes_cli.web_server import app, mount_spa
     mount_spa(app)
